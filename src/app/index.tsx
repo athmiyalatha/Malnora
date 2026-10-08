@@ -1,6 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
-import { PRODUCTS } from '@/data/products';
+import { getProducts } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -20,6 +20,43 @@ import {
 } from 'react-native';
 
 import AuthGate from './auth-gate';
+
+// ======================================================
+// PRODUCT TYPES
+// ======================================================
+
+type ApiProduct = {
+  _id: string;
+  name: string;
+  category: string;
+  department: string;
+  price: number;
+  mrp: number;
+  quantity: string;
+  stock?: number;
+  image?: string;
+  description?: string;
+  rating?: number;
+  ratingCount?: number;
+  active?: boolean;
+  emoji?: string;
+};
+
+type HomeProduct = {
+  id: string;
+  name: string;
+  category: string;
+  department: string;
+  price: number;
+  mrp: number;
+  quantity: string;
+  stock: number;
+  image?: string;
+  description: string;
+  rating: number;
+  ratingCount: number;
+  emoji: string;
+};
 
 // ======================================================
 // MALNORA COLOUR PALETTE
@@ -101,10 +138,6 @@ const CATEGORIES = [
 // ======================================================
 
 export default function HomeScreen() {
-  // ====================================================
-  // ROUTER
-  // ====================================================
-
   const router = useRouter();
 
   // ====================================================
@@ -132,8 +165,18 @@ export default function HomeScreen() {
   // ====================================================
 
   const [search, setSearch] = useState('');
+
   const [selectedCategory, setSelectedCategory] =
     useState('All');
+
+  const [products, setProducts] =
+    useState<HomeProduct[]>([]);
+
+  const [loadingProducts, setLoadingProducts] =
+    useState(true);
+
+  const [productError, setProductError] =
+    useState('');
 
   // ====================================================
   // CART TOTALS
@@ -151,19 +194,86 @@ export default function HomeScreen() {
   );
 
   // ====================================================
+  // LOAD PRODUCTS FROM MALNORA BACKEND
+  // ====================================================
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadProducts = async () => {
+      try {
+        setLoadingProducts(true);
+        setProductError('');
+
+        const data =
+          (await getProducts()) as ApiProduct[];
+
+        if (!mounted) return;
+
+        const normalizedProducts: HomeProduct[] =
+          data.map((product) => ({
+            id: product._id,
+            name: product.name,
+            category: product.category,
+            department: product.department,
+            price: product.price,
+            mrp: product.mrp,
+            quantity: product.quantity,
+            stock: product.stock ?? 0,
+            image: product.image || undefined,
+            description:
+              product.description ?? '',
+            rating: product.rating ?? 0,
+            ratingCount:
+              product.ratingCount ?? 0,
+            emoji:
+              product.emoji ?? '🛒',
+          }));
+
+        setProducts(normalizedProducts);
+      } catch (error) {
+        console.error(
+          'Failed to load products:',
+          error
+        );
+
+        if (mounted) {
+          setProductError(
+            'Could not load products. Please make sure the Malnora backend is running.'
+          );
+        }
+      } finally {
+        if (mounted) {
+          setLoadingProducts(false);
+        }
+      }
+    };
+
+    loadProducts();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // ====================================================
   // CATEGORY PARAMETER
   // ====================================================
 
   useEffect(() => {
-    const categoryParam = Array.isArray(params.category)
-      ? params.category[0]
-      : params.category;
+    const categoryParam =
+      Array.isArray(params.category)
+        ? params.category[0]
+        : params.category;
 
     if (!categoryParam) {
       return;
     }
 
-    const categoryMap: Record<string, string> = {
+    const categoryMap: Record<
+      string,
+      string
+    > = {
       Groceries: 'All',
       All: 'All',
       Fruits: 'Fruits',
@@ -187,10 +297,11 @@ export default function HomeScreen() {
   // ====================================================
 
   const filteredProducts = useMemo(() => {
-    const query = search.toLowerCase().trim();
+    const query = search
+      .toLowerCase()
+      .trim();
 
-    return PRODUCTS.filter((product) => {
-      // Only grocery products appear on the Home page
+    return products.filter((product) => {
       const isGrocery =
         product.department === 'Groceries';
 
@@ -200,11 +311,14 @@ export default function HomeScreen() {
 
       const matchesCategory =
         selectedCategory === 'All' ||
-        product.category === selectedCategory;
+        product.category ===
+          selectedCategory;
 
       const matchesSearch =
         !query ||
-        product.name.toLowerCase().includes(query) ||
+        product.name
+          .toLowerCase()
+          .includes(query) ||
         product.category
           .toLowerCase()
           .includes(query) ||
@@ -212,22 +326,34 @@ export default function HomeScreen() {
           .toLowerCase()
           .includes(query);
 
-      return matchesCategory && matchesSearch;
+      return (
+        matchesCategory &&
+        matchesSearch
+      );
     });
-  }, [search, selectedCategory]);
+  }, [
+    products,
+    search,
+    selectedCategory,
+  ]);
 
   // ====================================================
   // ADD TO CART
   // ====================================================
 
   const handleAddToCart = (
-    product: (typeof PRODUCTS)[number]
+    product: HomeProduct
   ) => {
+    if (product.stock <= 0) {
+      return;
+    }
+
     addToCart({
       id: product.id,
       name: product.name,
       price: product.price,
       emoji: product.emoji,
+      stock: product.stock,
     });
   };
 
@@ -235,7 +361,9 @@ export default function HomeScreen() {
   // OPEN PRODUCT DETAILS
   // ====================================================
 
-  const openProductDetails = (productId: string) => {
+  const openProductDetails = (
+    productId: string
+  ) => {
     router.push({
       pathname: '/product-details',
       params: {
@@ -278,7 +406,9 @@ export default function HomeScreen() {
 
   const openNammaSaree = async () => {
     try {
-      await Linking.openURL(NAMMA_SAREE_URL);
+      await Linking.openURL(
+        NAMMA_SAREE_URL
+      );
     } catch (error) {
       console.log(
         'Could not open Namma Saree website:',
@@ -312,7 +442,9 @@ export default function HomeScreen() {
 
       <ScrollView
         style={styles.container}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={
+          styles.scrollContent
+        }
         showsVerticalScrollIndicator={false}
       >
         {/* ================================================= */}
@@ -334,7 +466,9 @@ export default function HomeScreen() {
                 Malnora
               </Text>
 
-              <Text style={styles.brandTagline}>
+              <Text
+                style={styles.brandTagline}
+              >
                 GOODNESS IN EVERY BASKET
               </Text>
             </View>
@@ -342,7 +476,9 @@ export default function HomeScreen() {
 
           <Pressable
             style={styles.profileButton}
-            onPress={() => goTo('/profile')}
+            onPress={() =>
+              goTo('/profile')
+            }
           >
             <Ionicons
               name="person-outline"
@@ -358,7 +494,7 @@ export default function HomeScreen() {
 
         <Pressable
           style={styles.addressCard}
-          onPress={() => goTo('/saved-addresses')}
+          onPress={() => goTo('/address')}
         >
           <View style={styles.addressIcon}>
             <Ionicons
@@ -369,11 +505,15 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.addressText}>
-            <Text style={styles.addressLabel}>
+            <Text
+              style={styles.addressLabel}
+            >
               DELIVERING TO
             </Text>
 
-            <Text style={styles.addressTitle}>
+            <Text
+              style={styles.addressTitle}
+            >
               Your doorstep
             </Text>
           </View>
@@ -389,7 +529,9 @@ export default function HomeScreen() {
         {/* SEARCH */}
         {/* ================================================= */}
 
-        <View style={styles.searchContainer}>
+        <View
+          style={styles.searchContainer}
+        >
           <Ionicons
             name="search-outline"
             size={22}
@@ -407,7 +549,9 @@ export default function HomeScreen() {
 
           {search.length > 0 && (
             <Pressable
-              onPress={() => setSearch('')}
+              onPress={() =>
+                setSearch('')
+              }
             >
               <Ionicons
                 name="close-circle"
@@ -424,11 +568,15 @@ export default function HomeScreen() {
 
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionTitle}>
+            <Text
+              style={styles.sectionTitle}
+            >
               Shopping Departments
             </Text>
 
-            <Text style={styles.sectionSubtitle}>
+            <Text
+              style={styles.sectionSubtitle}
+            >
               Everything you need, all in one place
             </Text>
           </View>
@@ -436,28 +584,46 @@ export default function HomeScreen() {
 
         <ScrollView
           horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.departmentScroll}
+          showsHorizontalScrollIndicator={
+            false
+          }
+          contentContainerStyle={
+            styles.departmentScroll
+          }
         >
           {/* GROCERIES */}
 
           <Pressable
             style={styles.departmentCard}
             onPress={() =>
-              openDepartment('Groceries')
+              openDepartment(
+                'Groceries'
+              )
             }
           >
-            <View style={styles.departmentIcon}>
-              <Text style={styles.departmentEmoji}>
+            <View
+              style={styles.departmentIcon}
+            >
+              <Text
+                style={
+                  styles.departmentEmoji
+                }
+              >
                 🛒
               </Text>
             </View>
 
-            <Text style={styles.departmentTitle}>
+            <Text
+              style={styles.departmentTitle}
+            >
               Groceries
             </Text>
 
-            <Text style={styles.departmentSubtitle}>
+            <Text
+              style={
+                styles.departmentSubtitle
+              }
+            >
               Fresh & daily
             </Text>
           </Pressable>
@@ -467,20 +633,34 @@ export default function HomeScreen() {
           <Pressable
             style={styles.departmentCard}
             onPress={() =>
-              openDepartment('Home Appliances')
+              openDepartment(
+                'Home Appliances'
+              )
             }
           >
-            <View style={styles.departmentIcon}>
-              <Text style={styles.departmentEmoji}>
+            <View
+              style={styles.departmentIcon}
+            >
+              <Text
+                style={
+                  styles.departmentEmoji
+                }
+              >
                 🏠
               </Text>
             </View>
 
-            <Text style={styles.departmentTitle}>
+            <Text
+              style={styles.departmentTitle}
+            >
               Home Appliances
             </Text>
 
-            <Text style={styles.departmentSubtitle}>
+            <Text
+              style={
+                styles.departmentSubtitle
+              }
+            >
               Smart essentials
             </Text>
           </Pressable>
@@ -490,20 +670,34 @@ export default function HomeScreen() {
           <Pressable
             style={styles.departmentCard}
             onPress={() =>
-              openDepartment('Stationery')
+              openDepartment(
+                'Stationery'
+              )
             }
           >
-            <View style={styles.departmentIcon}>
-              <Text style={styles.departmentEmoji}>
+            <View
+              style={styles.departmentIcon}
+            >
+              <Text
+                style={
+                  styles.departmentEmoji
+                }
+              >
                 📚
               </Text>
             </View>
 
-            <Text style={styles.departmentTitle}>
+            <Text
+              style={styles.departmentTitle}
+            >
               Stationery
             </Text>
 
-            <Text style={styles.departmentSubtitle}>
+            <Text
+              style={
+                styles.departmentSubtitle
+              }
+            >
               School & office
             </Text>
           </Pressable>
@@ -513,20 +707,34 @@ export default function HomeScreen() {
           <Pressable
             style={styles.departmentCard}
             onPress={() =>
-              openDepartment('Skin Care')
+              openDepartment(
+                'Skin Care'
+              )
             }
           >
-            <View style={styles.departmentIcon}>
-              <Text style={styles.departmentEmoji}>
+            <View
+              style={styles.departmentIcon}
+            >
+              <Text
+                style={
+                  styles.departmentEmoji
+                }
+              >
                 ✨
               </Text>
             </View>
 
-            <Text style={styles.departmentTitle}>
+            <Text
+              style={styles.departmentTitle}
+            >
               Skin Care
             </Text>
 
-            <Text style={styles.departmentSubtitle}>
+            <Text
+              style={
+                styles.departmentSubtitle
+              }
+            >
               Personal care
             </Text>
           </Pressable>
@@ -536,20 +744,34 @@ export default function HomeScreen() {
           <Pressable
             style={styles.departmentCard}
             onPress={() =>
-              openDepartment('Medikits')
+              openDepartment(
+                'Medikits'
+              )
             }
           >
-            <View style={styles.departmentIcon}>
-              <Text style={styles.departmentEmoji}>
+            <View
+              style={styles.departmentIcon}
+            >
+              <Text
+                style={
+                  styles.departmentEmoji
+                }
+              >
                 💊
               </Text>
             </View>
 
-            <Text style={styles.departmentTitle}>
+            <Text
+              style={styles.departmentTitle}
+            >
               Medikits
             </Text>
 
-            <Text style={styles.departmentSubtitle}>
+            <Text
+              style={
+                styles.departmentSubtitle
+              }
+            >
               Basic care
             </Text>
           </Pressable>
@@ -563,34 +785,58 @@ export default function HomeScreen() {
           style={styles.nammaBanner}
           onPress={openNammaSaree}
         >
-          <View style={styles.nammaBannerText}>
-            <View style={styles.nammaSmallBadge}>
+          <View
+            style={styles.nammaBannerText}
+          >
+            <View
+              style={styles.nammaSmallBadge}
+            >
               <Ionicons
                 name="sparkles"
                 size={12}
                 color={C.sareeGold}
               />
 
-              <Text style={styles.nammaSmallBadgeText}>
+              <Text
+                style={
+                  styles.nammaSmallBadgeText
+                }
+              >
                 FEATURED STORE
               </Text>
             </View>
 
-            <Text style={styles.nammaTitle}>
+            <Text
+              style={styles.nammaTitle}
+            >
               Namma Saree
             </Text>
 
-            <Text style={styles.nammaSubtitle}>
+            <Text
+              style={styles.nammaSubtitle}
+            >
               Elegant sarees for every occasion
             </Text>
 
-            <Text style={styles.nammaDescription}>
+            <Text
+              style={
+                styles.nammaDescription
+              }
+            >
               Discover beautiful traditional and
               modern saree collections.
             </Text>
 
-            <View style={styles.nammaShopButton}>
-              <Text style={styles.nammaShopButtonText}>
+            <View
+              style={
+                styles.nammaShopButton
+              }
+            >
+              <Text
+                style={
+                  styles.nammaShopButtonText
+                }
+              >
                 SHOP SAREES
               </Text>
 
@@ -603,25 +849,43 @@ export default function HomeScreen() {
           </View>
 
           <View
-            style={styles.nammaBannerImageContainer}
+            style={
+              styles.nammaBannerImageContainer
+            }
           >
             <Image
               source={{
                 uri: NAMMA_SAREE_BANNER_IMAGE,
               }}
-              style={styles.nammaBannerImage}
+              style={
+                styles.nammaBannerImage
+              }
               resizeMode="cover"
             />
 
-            <View style={styles.nammaImageOverlay} />
+            <View
+              style={
+                styles.nammaImageOverlay
+              }
+            />
 
-            <View style={styles.nammaImageBadge}>
-              <Text style={styles.nammaImageBadgeText}>
+            <View
+              style={
+                styles.nammaImageBadge
+              }
+            >
+              <Text
+                style={
+                  styles.nammaImageBadgeText
+                }
+              >
                 Namma
               </Text>
 
               <Text
-                style={styles.nammaImageBadgeSubtext}
+                style={
+                  styles.nammaImageBadgeSubtext
+                }
               >
                 Saree
               </Text>
@@ -634,35 +898,55 @@ export default function HomeScreen() {
         {/* ================================================= */}
 
         <View style={styles.hero}>
-          <View style={styles.heroTextContainer}>
-            <View style={styles.heroBadge}>
-              <View style={styles.heroBadgeDot} />
+          <View
+            style={
+              styles.heroTextContainer
+            }
+          >
+            <View
+              style={styles.heroBadge}
+            >
+              <View
+                style={styles.heroBadgeDot}
+              />
 
-              <Text style={styles.heroBadgeText}>
+              <Text
+                style={styles.heroBadgeText}
+              >
                 FRESHNESS, DAILY
               </Text>
             </View>
 
-            <Text style={styles.heroTitle}>
+            <Text
+              style={styles.heroTitle}
+            >
               Eat fresh.
             </Text>
 
-            <Text style={styles.heroTitleGold}>
+            <Text
+              style={styles.heroTitleGold}
+            >
               Live well.
             </Text>
 
-            <Text style={styles.heroDescription}>
+            <Text
+              style={styles.heroDescription}
+            >
               Everyday goodness, delivered with care.
             </Text>
 
             <Pressable
               style={styles.shopButton}
               onPress={() => {
-                setSelectedCategory('All');
+                setSelectedCategory(
+                  'All'
+                );
                 setSearch('');
               }}
             >
-              <Text style={styles.shopButtonText}>
+              <Text
+                style={styles.shopButtonText}
+              >
                 SHOP NOW
               </Text>
 
@@ -674,22 +958,32 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.heroImageContainer}>
+          <View
+            style={
+              styles.heroImageContainer
+            }
+          >
             <ImageBackground
               source={{
                 uri: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=1200&auto=format&fit=crop&q=85',
               }}
               style={styles.heroImage}
-              imageStyle={styles.heroImageStyle}
+              imageStyle={
+                styles.heroImageStyle
+              }
             >
-              <View style={styles.freshPill}>
+              <View
+                style={styles.freshPill}
+              >
                 <Ionicons
                   name="leaf"
                   size={14}
                   color={C.green}
                 />
 
-                <Text style={styles.freshPillText}>
+                <Text
+                  style={styles.freshPillText}
+                >
                   FRESH
                 </Text>
               </View>
@@ -701,7 +995,9 @@ export default function HomeScreen() {
         {/* BENEFITS */}
         {/* ================================================= */}
 
-        <View style={styles.benefitsCard}>
+        <View
+          style={styles.benefitsCard}
+        >
           <View style={styles.benefit}>
             <Ionicons
               name="leaf-outline"
@@ -709,12 +1005,16 @@ export default function HomeScreen() {
               color={C.green}
             />
 
-            <Text style={styles.benefitText}>
+            <Text
+              style={styles.benefitText}
+            >
               Fresh picks
             </Text>
           </View>
 
-          <View style={styles.benefitDivider} />
+          <View
+            style={styles.benefitDivider}
+          />
 
           <View style={styles.benefit}>
             <Ionicons
@@ -723,12 +1023,16 @@ export default function HomeScreen() {
               color={C.green}
             />
 
-            <Text style={styles.benefitText}>
+            <Text
+              style={styles.benefitText}
+            >
               Daily needs
             </Text>
           </View>
 
-          <View style={styles.benefitDivider} />
+          <View
+            style={styles.benefitDivider}
+          />
 
           <View style={styles.benefit}>
             <Ionicons
@@ -737,7 +1041,9 @@ export default function HomeScreen() {
               color={C.green}
             />
 
-            <Text style={styles.benefitText}>
+            <Text
+              style={styles.benefitText}
+            >
               Made with care
             </Text>
           </View>
@@ -747,22 +1053,32 @@ export default function HomeScreen() {
         {/* CATEGORY HEADING */}
         {/* ================================================= */}
 
-        <View style={styles.sectionHeader}>
+        <View
+          style={styles.sectionHeader}
+        >
           <View>
-            <Text style={styles.sectionTitle}>
+            <Text
+              style={styles.sectionTitle}
+            >
               Shop by category
             </Text>
 
-            <Text style={styles.sectionSubtitle}>
+            <Text
+              style={styles.sectionSubtitle}
+            >
               Find your everyday favourites
             </Text>
           </View>
 
           <Pressable
-            onPress={() => goTo('/categories')}
+            onPress={() =>
+              goTo('/categories')
+            }
             style={styles.seeAllButton}
           >
-            <Text style={styles.seeAllText}>
+            <Text
+              style={styles.seeAllText}
+            >
               See all
             </Text>
 
@@ -780,73 +1096,93 @@ export default function HomeScreen() {
 
         <ScrollView
           horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoryList}
+          showsHorizontalScrollIndicator={
+            false
+          }
+          contentContainerStyle={
+            styles.categoryList
+          }
         >
-          {CATEGORIES.map((category) => {
-            const active =
-              selectedCategory === category.id;
+          {CATEGORIES.map(
+            (category) => {
+              const active =
+                selectedCategory ===
+                category.id;
 
-            return (
-              <Pressable
-                key={category.id}
-                style={[
-                  styles.categoryChip,
-                  active &&
-                    styles.categoryChipActive,
-                ]}
-                onPress={() =>
-                  setSelectedCategory(category.id)
-                }
-              >
-                <Ionicons
-                  name={category.icon}
-                  size={18}
-                  color={
-                    active
-                      ? C.surface
-                      : C.green
-                  }
-                />
-
-                <Text
+              return (
+                <Pressable
+                  key={category.id}
                   style={[
-                    styles.categoryChipText,
+                    styles.categoryChip,
                     active &&
-                      styles.categoryChipTextActive,
+                      styles.categoryChipActive,
                   ]}
+                  onPress={() =>
+                    setSelectedCategory(
+                      category.id
+                    )
+                  }
                 >
-                  {category.name}
-                </Text>
-              </Pressable>
-            );
-          })}
+                  <Ionicons
+                    name={category.icon}
+                    size={18}
+                    color={
+                      active
+                        ? C.surface
+                        : C.green
+                    }
+                  />
+
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      active &&
+                        styles.categoryChipTextActive,
+                    ]}
+                  >
+                    {category.name}
+                  </Text>
+                </Pressable>
+              );
+            }
+          )}
         </ScrollView>
 
         {/* ================================================= */}
         {/* PRODUCTS HEADING */}
         {/* ================================================= */}
 
-        <View style={styles.sectionHeader}>
+        <View
+          style={styles.sectionHeader}
+        >
           <View>
-            <Text style={styles.sectionTitle}>
+            <Text
+              style={styles.sectionTitle}
+            >
               {search
                 ? 'Search results'
-                : selectedCategory === 'All'
+                : selectedCategory ===
+                    'All'
                   ? 'Popular this week'
                   : selectedCategory}
             </Text>
 
-            <Text style={styles.sectionSubtitle}>
+            <Text
+              style={styles.sectionSubtitle}
+            >
               Fresh choices, just for you
             </Text>
           </View>
 
           <Pressable
-            onPress={() => goTo('/categories')}
+            onPress={() =>
+              goTo('/categories')
+            }
             style={styles.seeAllButton}
           >
-            <Text style={styles.seeAllText}>
+            <Text
+              style={styles.seeAllText}
+            >
               Explore
             </Text>
 
@@ -862,162 +1198,284 @@ export default function HomeScreen() {
         {/* PRODUCT GRID */}
         {/* ================================================= */}
 
-        {filteredProducts.length > 0 ? (
-          <View style={styles.productGrid}>
-            {filteredProducts.map((product) => (
-              <View
-                key={product.id}
-                style={styles.productCard}
-              >
-                {/* PRODUCT IMAGE / CLICK AREA */}
+        {loadingProducts ? (
+          <View
+            style={styles.emptySearch}
+          >
+            <Ionicons
+              name="refresh-outline"
+              size={36}
+              color={C.green}
+            />
 
-                <Pressable
-                  style={styles.productImageContainer}
-                  onPress={() =>
-                    openProductDetails(product.id)
+            <Text
+              style={
+                styles.emptySearchTitle
+              }
+            >
+              Loading products...
+            </Text>
+
+            <Text
+              style={
+                styles.emptySearchText
+              }
+            >
+              Getting the latest products from Malnora.
+            </Text>
+          </View>
+        ) : productError ? (
+          <View
+            style={styles.emptySearch}
+          >
+            <Ionicons
+              name="cloud-offline-outline"
+              size={36}
+              color={C.muted}
+            />
+
+            <Text
+              style={
+                styles.emptySearchTitle
+              }
+            >
+              Products unavailable
+            </Text>
+
+            <Text
+              style={
+                styles.emptySearchText
+              }
+            >
+              {productError}
+            </Text>
+          </View>
+        ) : filteredProducts.length >
+          0 ? (
+          <View
+            style={styles.productGrid}
+          >
+            {filteredProducts.map(
+              (product) => (
+                <View
+                  key={product.id}
+                  style={
+                    styles.productCard
                   }
                 >
-                  {product.image ? (
-                    <Image
-                      source={{
-                        uri: product.image,
-                      }}
-                      style={styles.productImage}
-                      resizeMode="cover"
-                    />
-                  ) : (
+                  {/* PRODUCT IMAGE */}
+
+                  <Pressable
+                    style={
+                      styles.productImageContainer
+                    }
+                    onPress={() =>
+                      openProductDetails(
+                        product.id
+                      )
+                    }
+                  >
+                    {product.image ? (
+                      <Image
+                        source={{
+                          uri: product.image,
+                        }}
+                        style={
+                          styles.productImage
+                        }
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View
+                        style={
+                          styles.productEmojiContainer
+                        }
+                      >
+                        <Text
+                          style={
+                            styles.productEmoji
+                          }
+                        >
+                          {
+                            product.emoji
+                          }
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* PRODUCT TAG */}
+
                     <View
                       style={
-                        styles.productEmojiContainer
+                        styles.productTag
                       }
                     >
                       <Text
-                        style={styles.productEmoji}
+                        style={
+                          styles.productTagText
+                        }
                       >
-                        {product.emoji}
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* PRODUCT TAG */}
-
-                  <View style={styles.productTag}>
-                    <Text
-                      style={styles.productTagText}
-                    >
-                      {product.category ===
-                      'Fruits'
-                        ? 'Fresh'
-                        : product.category ===
-                            'Vegetables'
+                        {product.category ===
+                        'Fruits'
                           ? 'Fresh'
                           : product.category ===
-                              'Dairy'
-                            ? 'Daily essential'
+                              'Vegetables'
+                            ? 'Fresh'
                             : product.category ===
-                                'Bakery'
-                              ? 'Freshly baked'
-                              : 'Popular'}
-                    </Text>
-                  </View>
+                                'Dairy'
+                              ? 'Daily essential'
+                              : product.category ===
+                                  'Bakery'
+                                ? 'Freshly baked'
+                                : 'Popular'}
+                      </Text>
+                    </View>
 
-                  {/* ADD BUTTON */}
-
-                  <Pressable
-                    style={styles.addButton}
-                    onPress={() =>
-                      handleAddToCart(product)
-                    }
-                  >
-                    <Ionicons
-                      name="add"
-                      size={23}
-                      color={C.surface}
-                    />
-                  </Pressable>
-                </Pressable>
-
-                {/* PRODUCT INFORMATION */}
-
-                <Pressable
-                  style={styles.productInfo}
-                  onPress={() =>
-                    openProductDetails(product.id)
-                  }
-                >
-                  <Text
-                    style={styles.productCategory}
-                  >
-                    {product.category.toUpperCase()}
-                  </Text>
-
-                  <Text
-                    style={styles.productName}
-                    numberOfLines={2}
-                  >
-                    {product.name}
-                  </Text>
-
-                  <View
-                    style={styles.ratingRow}
-                  >
-                    <Ionicons
-                      name="star"
-                      size={13}
-                      color={C.goldDark}
-                    />
-
-                    <Text
-                      style={styles.ratingText}
-                    >
-                      {product.rating.toFixed(1)}
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.ratingCountText
-                      }
-                    >
-                      ({product.ratingCount})
-                    </Text>
-                  </View>
-
-                  <Text
-                    style={styles.productUnit}
-                  >
-                    {product.quantity}
-                  </Text>
-
-                  <View
-                    style={styles.productBottom}
-                  >
-                    <Text
-                      style={styles.productPrice}
-                    >
-                      ₹{product.price}
-                    </Text>
+                    {/* ADD BUTTON */}
 
                     <Pressable
                       style={
-                        styles.smallAddButton
+                        styles.addButton
                       }
-                      onPress={() =>
-                        handleAddToCart(product)
-                      }
+                      onPress={(
+                        event
+                      ) => {
+                        event.stopPropagation();
+                        handleAddToCart(
+                          product
+                        );
+                      }}
                     >
                       <Ionicons
                         name="add"
-                        size={19}
-                        color={C.green}
+                        size={23}
+                        color={C.surface}
                       />
                     </Pressable>
-                  </View>
-                </Pressable>
-              </View>
-            ))}
+                  </Pressable>
+
+                  {/* PRODUCT INFORMATION */}
+
+                  <Pressable
+                    style={
+                      styles.productInfo
+                    }
+                    onPress={() =>
+                      openProductDetails(
+                        product.id
+                      )
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.productCategory
+                      }
+                    >
+                      {product.category.toUpperCase()}
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.productName
+                      }
+                      numberOfLines={2}
+                    >
+                      {product.name}
+                    </Text>
+
+                    <View
+                      style={
+                        styles.ratingRow
+                      }
+                    >
+                      <Ionicons
+                        name="star"
+                        size={13}
+                        color={
+                          C.goldDark
+                        }
+                      />
+
+                      <Text
+                        style={
+                          styles.ratingText
+                        }
+                      >
+                        {product.rating.toFixed(
+                          1
+                        )}
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.ratingCountText
+                        }
+                      >
+                        (
+                        {
+                          product.ratingCount
+                        }
+                        )
+                      </Text>
+                    </View>
+
+                    <Text
+                      style={
+                        styles.productUnit
+                      }
+                    >
+                      {
+                        product.quantity
+                      }
+                    </Text>
+
+                    <View
+                      style={
+                        styles.productBottom
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.productPrice
+                        }
+                      >
+                        ₹
+                        {
+                          product.price
+                        }
+                      </Text>
+
+                      <Pressable
+                        style={
+                          styles.smallAddButton
+                        }
+                        onPress={(
+                          event
+                        ) => {
+                          event.stopPropagation();
+                          handleAddToCart(
+                            product
+                          );
+                        }}
+                      >
+                        <Ionicons
+                          name="add"
+                          size={19}
+                          color={
+                            C.green
+                          }
+                        />
+                      </Pressable>
+                    </View>
+                  </Pressable>
+                </View>
+              )
+            )}
           </View>
         ) : (
-          <View style={styles.emptySearch}>
+          <View
+            style={styles.emptySearch}
+          >
             <Ionicons
               name="search-outline"
               size={36}
@@ -1025,26 +1483,36 @@ export default function HomeScreen() {
             />
 
             <Text
-              style={styles.emptySearchTitle}
+              style={
+                styles.emptySearchTitle
+              }
             >
               No products found
             </Text>
 
             <Text
-              style={styles.emptySearchText}
+              style={
+                styles.emptySearchText
+              }
             >
               Try another search or category.
             </Text>
 
             <Pressable
-              style={styles.clearSearchButton}
+              style={
+                styles.clearSearchButton
+              }
               onPress={() => {
                 setSearch('');
-                setSelectedCategory('All');
+                setSelectedCategory(
+                  'All'
+                );
               }}
             >
               <Text
-                style={styles.clearSearchText}
+                style={
+                  styles.clearSearchText
+                }
               >
                 Clear filters
               </Text>
@@ -1052,9 +1520,9 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* BOTTOM SPACE */}
-
-        <View style={{ height: 110 }} />
+        <View
+          style={{ height: 110 }}
+        />
       </ScrollView>
 
       {/* ================================================= */}
@@ -1064,10 +1532,14 @@ export default function HomeScreen() {
       {cartCount > 0 && (
         <Pressable
           style={styles.floatingCart}
-          onPress={() => goTo('/cart')}
+          onPress={() =>
+            goTo('/cart')
+          }
         >
           <View
-            style={styles.cartIconContainer}
+            style={
+              styles.cartIconContainer
+            }
           >
             <Ionicons
               name="bag-handle-outline"
@@ -1076,10 +1548,14 @@ export default function HomeScreen() {
             />
 
             <View
-              style={styles.cartCountBadge}
+              style={
+                styles.cartCountBadge
+              }
             >
               <Text
-                style={styles.cartCountText}
+                style={
+                  styles.cartCountText
+                }
               >
                 {cartCount}
               </Text>
@@ -1087,16 +1563,22 @@ export default function HomeScreen() {
           </View>
 
           <View
-            style={styles.floatingCartText}
+            style={
+              styles.floatingCartText
+            }
           >
             <Text
-              style={styles.floatingCartTitle}
+              style={
+                styles.floatingCartTitle
+              }
             >
               View your cart
             </Text>
 
             <Text
-              style={styles.floatingCartSubtitle}
+              style={
+                styles.floatingCartSubtitle
+              }
             >
               {cartCount}{' '}
               {cartCount === 1
@@ -1106,7 +1588,9 @@ export default function HomeScreen() {
           </View>
 
           <Text
-            style={styles.floatingCartPrice}
+            style={
+              styles.floatingCartPrice
+            }
           >
             ₹{cartTotal}
           </Text>
@@ -1124,11 +1608,11 @@ export default function HomeScreen() {
       {/* ================================================= */}
 
       <View style={styles.bottomNav}>
-        {/* HOME */}
-
         <Pressable
           style={styles.navItem}
-          onPress={() => goTo('/')}
+          onPress={() =>
+            goTo('/')
+          }
         >
           <Ionicons
             name="home"
@@ -1136,16 +1620,20 @@ export default function HomeScreen() {
             color={C.goldDark}
           />
 
-          <Text style={styles.navActiveText}>
+          <Text
+            style={
+              styles.navActiveText
+            }
+          >
             Home
           </Text>
         </Pressable>
 
-        {/* CATEGORIES */}
-
         <Pressable
           style={styles.navItem}
-          onPress={() => goTo('/categories')}
+          onPress={() =>
+            goTo('/categories')
+          }
         >
           <Ionicons
             name="grid-outline"
@@ -1153,16 +1641,18 @@ export default function HomeScreen() {
             color={C.muted}
           />
 
-          <Text style={styles.navText}>
+          <Text
+            style={styles.navText}
+          >
             Categories
           </Text>
         </Pressable>
 
-        {/* MY ORDERS */}
-
         <Pressable
           style={styles.navItem}
-          onPress={() => goTo('/my-orders')}
+          onPress={() =>
+            goTo('/my-orders')
+          }
         >
           <Ionicons
             name="receipt-outline"
@@ -1170,16 +1660,18 @@ export default function HomeScreen() {
             color={C.muted}
           />
 
-          <Text style={styles.navText}>
+          <Text
+            style={styles.navText}
+          >
             My Orders
           </Text>
         </Pressable>
 
-        {/* CART */}
-
         <Pressable
           style={styles.navItem}
-          onPress={() => goTo('/cart')}
+          onPress={() =>
+            goTo('/cart')
+          }
         >
           <View>
             <Ionicons
@@ -1190,7 +1682,9 @@ export default function HomeScreen() {
 
             {cartCount > 0 && (
               <View
-                style={styles.navCartBadge}
+                style={
+                  styles.navCartBadge
+                }
               >
                 <Text
                   style={
@@ -1203,16 +1697,18 @@ export default function HomeScreen() {
             )}
           </View>
 
-          <Text style={styles.navText}>
+          <Text
+            style={styles.navText}
+          >
             Cart
           </Text>
         </Pressable>
 
-        {/* PROFILE */}
-
         <Pressable
           style={styles.navItem}
-          onPress={() => goTo('/profile')}
+          onPress={() =>
+            goTo('/profile')
+          }
         >
           <Ionicons
             name="person-outline"
@@ -1220,7 +1716,9 @@ export default function HomeScreen() {
             color={C.muted}
           />
 
-          <Text style={styles.navText}>
+          <Text
+            style={styles.navText}
+          >
             Profile
           </Text>
         </Pressable>
@@ -1234,10 +1732,6 @@ export default function HomeScreen() {
 // ======================================================
 
 const styles = StyleSheet.create({
-  // ====================================================
-  // MAIN
-  // ====================================================
-
   safeArea: {
     flex: 1,
     backgroundColor: C.background,
@@ -1412,7 +1906,7 @@ const styles = StyleSheet.create({
   },
 
   // ====================================================
-  // SHOPPING DEPARTMENTS
+  // DEPARTMENTS
   // ====================================================
 
   departmentScroll: {
@@ -1457,7 +1951,7 @@ const styles = StyleSheet.create({
   },
 
   // ====================================================
-  // NAMMA SAREE BANNER
+  // NAMMA SAREE
   // ====================================================
 
   nammaBanner: {
@@ -1559,14 +2053,16 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: '45%',
-    backgroundColor: 'rgba(125,24,37,0.38)',
+    backgroundColor:
+      'rgba(125,24,37,0.38)',
   },
 
   nammaImageBadge: {
     position: 'absolute',
     right: 13,
     bottom: 13,
-    backgroundColor: 'rgba(255,255,255,0.94)',
+    backgroundColor:
+      'rgba(255,255,255,0.94)',
     paddingHorizontal: 12,
     paddingVertical: 9,
     borderRadius: 13,

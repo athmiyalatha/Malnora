@@ -1,150 +1,187 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useState,
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useState,
+  type ReactNode,
 } from 'react';
 
-export const ORDER_STORAGE_KEY = '@malnora_orders';
+import type {
+  Order,
+  OrderStatus,
+} from '@/types/order';
 
-export type OrderStatus =
-  | 'Order Placed'
-  | 'Order Confirmed'
-  | 'Out for Delivery'
-  | 'Delivered';
-
-export type OrderItem = {
-  id: string | number;
-  name: string;
-  price: number;
-  emoji?: string;
-  quantity: number;
-};
-
-export type Order = {
-  orderId: string | number;
-  name: string;
-  phone: string;
-  address: string;
-  items: OrderItem[];
-  subtotal: number;
-  deliveryFee: number;
-  total: number;
-  payment: string;
-  status: OrderStatus;
-  createdAt: string;
-};
+const API_URL = 'http://127.0.0.1:5000/api';
 
 type OrderContextType = {
   orders: Order[];
-  loading: boolean;
   addOrder: (order: Order) => void;
+  getOrder: (id: string) => Order | undefined;
   updateOrderStatus: (
-  orderId: string | number,
-  status: OrderStatus
-) => Promise<void>;
+    id: string,
+    status: OrderStatus
+  ) => void;
+  refreshOrders: () => Promise<void>;
+  clearOrders: () => void;
 };
 
-const OrderContext = createContext<OrderContextType | undefined>(
-  undefined
-);
+const OrderContext =
+  createContext<OrderContextType | undefined>(
+    undefined
+  );
+
+type OrderProviderProps = {
+  children: ReactNode;
+};
+
+const normalizeOrder = (order: any): Order => {
+  return {
+    id: order._id || order.id,
+
+    orderNumber: order.orderNumber,
+
+    items: (order.items || []).map((item: any) => ({
+      id: item.productId || item.id || '',
+      name: item.name || '',
+      price: Number(item.price) || 0,
+      emoji: item.emoji,
+      quantity: Number(item.quantity) || 1,
+    })),
+
+    deliveryAddress: {
+      fullName:
+        order.deliveryAddress?.fullName || '',
+      phone:
+        order.deliveryAddress?.phone || '',
+      address:
+        order.deliveryAddress?.address || '',
+      city:
+        order.deliveryAddress?.city || '',
+      pincode:
+        order.deliveryAddress?.pincode || '',
+    },
+
+    paymentMethod: 'cod',
+
+    subtotal: Number(order.subtotal) || 0,
+
+    deliveryFee:
+      Number(order.deliveryFee) || 0,
+
+    total: Number(order.total) || 0,
+
+    status: order.status || 'confirmed',
+
+    createdAt:
+      order.createdAt ||
+      new Date().toISOString(),
+  };
+};
 
 export function OrderProvider({
   children,
-}: {
-  children: React.ReactNode;
-}) {
+}: OrderProviderProps) {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  // Load saved orders when the app starts.
-  useEffect(() => {
-    let mounted = true;
+  const addOrder = useCallback(
+    (order: Order) => {
+      setOrders((currentOrders) => [
+        order,
+        ...currentOrders.filter(
+          (existingOrder) =>
+            existingOrder.id !== order.id
+        ),
+      ]);
+    },
+    []
+  );
 
-    async function loadOrders() {
+  const getOrder = useCallback(
+    (id: string) => {
+      return orders.find(
+        (order) => order.id === id
+      );
+    },
+    [orders]
+  );
+
+  const updateOrderStatus = useCallback(
+    (
+      id: string,
+      status: OrderStatus
+    ) => {
+      setOrders((currentOrders) =>
+        currentOrders.map((order) =>
+          order.id === id
+            ? {
+                ...order,
+                status,
+              }
+            : order
+        )
+      );
+    },
+    []
+  );
+
+  const refreshOrders = useCallback(
+    async () => {
       try {
-        const savedOrders = await AsyncStorage.getItem(
-          ORDER_STORAGE_KEY
+        console.log(
+          'Loading orders from MongoDB...'
         );
 
-        if (savedOrders && mounted) {
-          const parsedOrders: Order[] = JSON.parse(savedOrders);
-          setOrders(Array.isArray(parsedOrders) ? parsedOrders : []);
+        const response = await fetch(
+          `${API_URL}/orders`
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.message ||
+              'Failed to fetch orders'
+          );
         }
+
+        const serverOrders =
+          Array.isArray(data.orders)
+            ? data.orders
+            : [];
+
+        const normalizedOrders =
+          serverOrders.map(normalizeOrder);
+
+        setOrders(normalizedOrders);
+
+        console.log(
+          `Loaded ${normalizedOrders.length} orders from MongoDB`
+        );
       } catch (error) {
-        console.error('Failed to load Malnora orders:', error);
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        console.error(
+          'Failed to refresh orders:',
+          error
+        );
+
+        throw error;
       }
-    }
+    },
+    []
+  );
 
-    loadOrders();
-
-    return () => {
-      mounted = false;
-    };
+  const clearOrders = useCallback(() => {
+    setOrders([]);
   }, []);
 
-  // Save orders whenever the list changes after loading.
-  useEffect(() => {
-    if (loading) return;
-
-    AsyncStorage.setItem(
-      ORDER_STORAGE_KEY,
-      JSON.stringify(orders)
-    ).catch((error) => {
-      console.error('Failed to save Malnora orders:', error);
-    });
-  }, [orders, loading]);
-
-  // Add a newly placed order.
-  const addOrder = useCallback((order: Order) => {
-    setOrders((previousOrders) => {
-      const alreadyExists = previousOrders.some(
-        (item) => String(item.orderId) === String(order.orderId)
-      );
-
-      if (alreadyExists) {
-        return previousOrders;
-      }
-
-      return [
-        {
-          ...order,
-          status: order.status || 'Order Placed',
-        },
-        ...previousOrders,
-      ];
-    });
-  }, []);
-
-  // Update the status of a particular order.
-  const updateOrderStatus = useCallback(
-  async (
-    orderId: string | number,
-    status: OrderStatus
-  ) => {
-    setOrders((previousOrders) =>
-      previousOrders.map((order) =>
-        String(order.orderId) === String(orderId)
-          ? { ...order, status }
-          : order
-      )
-    );
-  },
-  []
-);
   return (
     <OrderContext.Provider
       value={{
         orders,
-        loading,
         addOrder,
+        getOrder,
         updateOrderStatus,
+        refreshOrders,
+        clearOrders,
       }}
     >
       {children}
@@ -152,7 +189,7 @@ export function OrderProvider({
   );
 }
 
-export function useOrders() {
+export function useOrders(): OrderContextType {
   const context = useContext(OrderContext);
 
   if (!context) {

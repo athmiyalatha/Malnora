@@ -1,10 +1,14 @@
+import { useCart } from '@/context/CartContext';
+import { useOrders } from '@/context/OrderContext';
+import { createOrder } from '@/services/api';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Stack, router } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Pressable,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,165 +16,246 @@ import {
   View,
 } from 'react-native';
 
-import { useCart } from '@/context/CartContext';
-import { useOrders } from '@/context/OrderContext';
+const C = {
+  maroon: '#741B2B',
+  darkMaroon: '#4B101D',
+  gold: '#B18A4A',
+  cream: '#FBF6ED',
+  white: '#FFFFFF',
+  text: '#241A17',
+  muted: '#827568',
+  border: '#E8DED3',
+  green: '#426B48',
+  lightGreen: '#EEF5EF',
+};
 
-const ADDRESS_STORAGE_KEY = '@malnora_addresses';
-
-const MAROON = '#741B2B';
-const DARK_MAROON = '#4B101D';
-const CREAM = '#FBF6ED';
-const MUTED = '#827568';
-const BORDER = '#E9DFD2';
-const GREEN = '#426B48';
+const STORAGE_KEY = '@malnora_saved_addresses';
 
 type SavedAddress = {
   id: string;
-  label: 'Home' | 'Work' | 'Other';
-  recipient: string;
+  label: string;
+  fullName: string;
   phone: string;
-  house: string;
-  street: string;
-  area: string;
+  address: string;
   city: string;
-  pinCode: string;
+  pincode: string;
   isDefault: boolean;
 };
 
-const formatAddress = (address: SavedAddress) =>
-  [
-    address.house,
-    address.street,
-    address.area,
-    address.city,
-    address.pinCode,
-  ]
-    .filter(Boolean)
-    .join(', ');
-
 export default function CheckoutScreen() {
+  const router = useRouter();
+
   const { items, clearCart } = useCart();
   const { addOrder } = useOrders();
 
-  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
-  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(
-    null
-  );
+  // ==================================================
+  // DELIVERY ADDRESS
+  // ==================================================
 
-  const [name, setName] = useState('');
+  const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<
-    'COD' | 'ONLINE'
-  >('COD');
+  const [pincode, setPincode] = useState('');
 
-  const [loadingAddresses, setLoadingAddresses] = useState(true);
-  const [placingOrder, setPlacingOrder] = useState(false);
+  // ==================================================
+  // SAVED ADDRESSES
+  // ==================================================
+
+  const [savedAddresses, setSavedAddresses] =
+    useState<SavedAddress[]>([]);
+
+  const [showSavedAddresses, setShowSavedAddresses] =
+    useState(false);
+
+  // ==================================================
+  // PAYMENT
+  // ==================================================
+
+  const [paymentMethod, setPaymentMethod] =
+    useState<'cod'>('cod');
+
+  const [placingOrder, setPlacingOrder] =
+    useState(false);
+
+  // ==================================================
+  // LOAD SAVED ADDRESSES
+  // ==================================================
 
   useEffect(() => {
+    const loadSavedAddresses = async () => {
+      try {
+        const saved =
+          await AsyncStorage.getItem(STORAGE_KEY);
+
+        if (!saved) {
+          return;
+        }
+
+        const parsed: SavedAddress[] =
+          JSON.parse(saved);
+
+        if (Array.isArray(parsed)) {
+          setSavedAddresses(parsed);
+
+          // Automatically use default address
+          const defaultAddress =
+            parsed.find(
+              (item) => item.isDefault
+            );
+
+          if (defaultAddress) {
+            setFullName(defaultAddress.fullName);
+            setPhone(defaultAddress.phone);
+            setAddress(defaultAddress.address);
+            setCity(defaultAddress.city);
+            setPincode(defaultAddress.pincode);
+          }
+        }
+      } catch (error) {
+        console.error(
+          'Failed to load saved addresses:',
+          error
+        );
+      }
+    };
+
     loadSavedAddresses();
   }, []);
 
-  const loadSavedAddresses = async () => {
-    try {
-      const stored = await AsyncStorage.getItem(ADDRESS_STORAGE_KEY);
+  // ==================================================
+  // SELECT SAVED ADDRESS
+  // ==================================================
 
-      if (!stored) {
-        return;
-      }
+  const selectSavedAddress = (
+    savedAddress: SavedAddress
+  ) => {
+    setFullName(savedAddress.fullName);
+    setPhone(savedAddress.phone);
+    setAddress(savedAddress.address);
+    setCity(savedAddress.city);
+    setPincode(savedAddress.pincode);
 
-      const parsed: SavedAddress[] = JSON.parse(stored);
-      setSavedAddresses(parsed);
-
-      if (parsed.length > 0) {
-        const defaultAddress =
-          parsed.find((item) => item.isDefault) ?? parsed[0];
-
-        selectAddress(defaultAddress);
-      }
-    } catch (error) {
-      console.error('Could not load saved addresses:', error);
-      Alert.alert(
-        'Address error',
-        'We could not load your saved addresses.'
-      );
-    } finally {
-      setLoadingAddresses(false);
-    }
+    setShowSavedAddresses(false);
   };
 
-  const selectAddress = (saved: SavedAddress) => {
-    setSelectedAddressId(saved.id);
-    setName(saved.recipient);
-    setPhone(saved.phone);
-    setAddress(formatAddress(saved));
-    setCity(saved.city);
-  };
+  // ==================================================
+  // TOTALS
+  // ==================================================
 
   const subtotal = useMemo(
     () =>
       items.reduce(
-        (total, item) => total + item.price * item.quantity,
+        (total, item) =>
+          total + item.price * item.quantity,
         0
       ),
     [items]
   );
 
-  const deliveryFee = subtotal === 0 || subtotal >= 499 ? 0 : 30;
-  const total = subtotal + deliveryFee;
+  const deliveryFee =
+    subtotal >= 499 ? 0 : 40;
 
-  const openSavedAddresses = () => {
-    router.push('/saved-addresses');
-  };
+  const total =
+    subtotal + deliveryFee;
+
+  // ==================================================
+  // PLACE ORDER
+  // ==================================================
 
   const placeOrder = async () => {
-    if (items.length === 0) {
-      Alert.alert('Your cart is empty', 'Add products before checkout.');
-      router.replace('/cart');
+    if (!fullName.trim()) {
+      Alert.alert(
+        'Missing information',
+        'Please enter your full name.'
+      );
       return;
     }
 
-    if (!name.trim()) {
-      Alert.alert('Missing name', 'Please enter the recipient name.');
-      return;
-    }
-
-    if (!/^[0-9]{10}$/.test(phone.trim())) {
+    if (
+      !phone.trim() ||
+      phone.replace(/\D/g, '').length !== 10
+    ) {
       Alert.alert(
         'Invalid phone number',
-        'Please enter a valid 10-digit mobile number.'
+        'Please enter a valid 10-digit phone number.'
       );
       return;
     }
 
-    if (!address.trim() || !city.trim()) {
+    if (!address.trim()) {
       Alert.alert(
         'Missing address',
-        'Please select a saved address or enter your delivery address.'
+        'Please enter your complete delivery address.'
       );
       return;
     }
 
-    if (paymentMethod === 'ONLINE') {
+    if (!city.trim()) {
       Alert.alert(
-        'Coming soon',
-        'Online payments are not connected yet. Please choose Cash on Delivery.'
+        'Missing city',
+        'Please enter your city.'
       );
       return;
     }
 
-    setPlacingOrder(true);
+    if (!/^\d{6}$/.test(pincode.trim())) {
+      Alert.alert(
+        'Invalid pincode',
+        'Please enter a valid 6-digit pincode.'
+      );
+      return;
+    }
 
-    const orderId = `MAL${Date.now().toString().slice(-8)}`;
-    const createdAt = new Date().toISOString();
+    if (items.length === 0) {
+      Alert.alert(
+        'Your cart is empty',
+        'Please add some products before checkout.'
+      );
+      return;
+    }
+
+    if (placingOrder) {
+      return;
+    }
 
     try {
-      await addOrder({
-        orderId,
-        name: name.trim(),
-        phone: phone.trim(),
-        address: `${address.trim()}, ${city.trim()}`,
+      setPlacingOrder(true);
+
+      const orderNumber =
+        `MQ${Date.now()}`;
+
+      // Send order to MongoDB
+      const createdOrder =
+        await createOrder({
+          orderNumber,
+
+          items: items.map((item) => ({
+            productId: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity,
+          })),
+
+          deliveryAddress: {
+            fullName: fullName.trim(),
+            phone: phone.trim(),
+            address: address.trim(),
+            city: city.trim(),
+            pincode: pincode.trim(),
+          },
+
+          paymentMethod,
+
+          subtotal,
+          deliveryFee,
+          total,
+        });
+
+      // Save order locally
+      addOrder({
+        id: createdOrder._id,
+
         items: items.map((item) => ({
           id: item.id,
           name: item.name,
@@ -178,822 +263,1239 @@ export default function CheckoutScreen() {
           emoji: item.emoji,
           quantity: item.quantity,
         })),
+
+        deliveryAddress: {
+          fullName: fullName.trim(),
+          phone: phone.trim(),
+          address: address.trim(),
+          city: city.trim(),
+          pincode: pincode.trim(),
+        },
+
+        paymentMethod,
+
         subtotal,
         deliveryFee,
         total,
-        payment: 'Cash on Delivery',
-        status: 'Order Placed',
-        createdAt,
+
+        status: 'confirmed',
+
+        createdAt:
+          createdOrder.createdAt ||
+          new Date().toISOString(),
       });
 
-      await clearCart();
+      // Clear cart after successful order
+      clearCart();
 
+      // Open success screen
       router.replace({
         pathname: '/order-success',
         params: {
-          orderId,
-          name: name.trim(),
-          total: String(total),
-          address: `${address.trim()}, ${city.trim()}`,
-          payment: 'Cash on Delivery',
+          orderId: createdOrder._id,
         },
       });
     } catch (error) {
-      console.error('Could not place order:', error);
+      console.error(
+        'Place order error:',
+        error
+      );
+
       Alert.alert(
         'Order failed',
-        'We could not place your order. Please try again.'
+        error instanceof Error
+          ? error.message
+          : 'Unable to place your order. Please try again.'
       );
     } finally {
       setPlacingOrder(false);
     }
   };
 
-  return (
-    <View style={styles.screen}>
-      <Stack.Screen
-        options={{
-          title: 'Checkout',
-          headerShown: true,
-          headerStyle: { backgroundColor: CREAM },
-          headerTintColor: DARK_MAROON,
-          headerTitleStyle: { fontWeight: '800' },
-        }}
-      />
+  // ==================================================
+  // EMPTY CART
+  // ==================================================
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.heading}>
-          <Text style={styles.title}>Checkout</Text>
-          <Text style={styles.subtitle}>
-            One more step to fresh groceries
-          </Text>
-        </View>
-
-        {/* DELIVERY ADDRESS */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeading}>
-            <View style={styles.sectionTitleRow}>
-              <Text style={styles.sectionIcon}>📍</Text>
-              <Text style={styles.sectionTitle}>Delivery address</Text>
-            </View>
-
-            <Pressable onPress={openSavedAddresses}>
-              <Text style={styles.link}>Manage</Text>
-            </Pressable>
+  if (items.length === 0) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.emptyContainer}>
+          <View style={styles.emptyIcon}>
+            <Ionicons
+              name="cart-outline"
+              size={52}
+              color={C.maroon}
+            />
           </View>
 
-          {loadingAddresses ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator color={MAROON} />
-              <Text style={styles.loadingText}>
-                Loading saved addresses...
-              </Text>
-            </View>
-          ) : savedAddresses.length > 0 ? (
-            <>
-              <Text style={styles.helperText}>
-                Choose where you want your groceries delivered.
-              </Text>
-
-              {savedAddresses.map((saved) => {
-                const selected = selectedAddressId === saved.id;
-
-                return (
-                  <Pressable
-                    key={saved.id}
-                    onPress={() => selectAddress(saved)}
-                    style={[
-                      styles.addressOption,
-                      selected && styles.addressOptionSelected,
-                    ]}
-                  >
-                    <View style={styles.addressOptionTop}>
-                      <View style={styles.addressLabelRow}>
-                        <Text style={styles.addressEmoji}>
-                          {saved.label === 'Home'
-                            ? '🏠'
-                            : saved.label === 'Work'
-                              ? '🏢'
-                              : '📍'}
-                        </Text>
-
-                        <Text style={styles.addressLabel}>
-                          {saved.label}
-                        </Text>
-
-                        {saved.isDefault && (
-                          <Text style={styles.defaultTag}>DEFAULT</Text>
-                        )}
-                      </View>
-
-                      <View
-                        style={[
-                          styles.radio,
-                          selected && styles.radioSelected,
-                        ]}
-                      >
-                        {selected && <View style={styles.radioInner} />}
-                      </View>
-                    </View>
-
-                    <Text style={styles.addressRecipient}>
-                      {saved.recipient}
-                    </Text>
-
-                    <Text style={styles.addressText}>
-                      {formatAddress(saved)}
-                    </Text>
-
-                    <Text style={styles.addressPhone}>
-                      Phone: {saved.phone}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-
-              <Pressable
-                style={styles.addAddressButton}
-                onPress={openSavedAddresses}
-              >
-                <Text style={styles.addAddressText}>
-                  + Add or edit saved addresses
-                </Text>
-              </Pressable>
-            </>
-          ) : (
-            <View style={styles.noAddressBox}>
-              <Text style={styles.noAddressTitle}>
-                No saved addresses yet
-              </Text>
-
-              <Text style={styles.helperText}>
-                Add an address to select it for this delivery.
-              </Text>
-
-              <Pressable
-                style={styles.primaryButton}
-                onPress={openSavedAddresses}
-              >
-                <Text style={styles.primaryButtonText}>
-                  Add a delivery address
-                </Text>
-              </Pressable>
-            </View>
-          )}
-
-          {/* Allow checkout to continue with manually entered details too. */}
-          <Text style={styles.manualTitle}>
-            Delivery details
+          <Text style={styles.emptyTitle}>
+            Your cart is empty
           </Text>
 
-          <Text style={styles.inputLabel}>Recipient name</Text>
+          <Text style={styles.emptyText}>
+            Add some groceries to your cart
+            before proceeding to checkout.
+          </Text>
+
+          <Pressable
+            style={styles.shopButton}
+            onPress={() =>
+              router.replace('/')
+            }
+          >
+            <Text
+              style={styles.shopButtonText}
+            >
+              Continue Shopping
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ==================================================
+  // CHECKOUT SCREEN
+  // ==================================================
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      {/* HEADER */}
+
+      <View style={styles.header}>
+        <Pressable
+          style={styles.backButton}
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/');
+            }
+          }}
+          disabled={placingOrder}
+        >
+          <Ionicons
+            name="arrow-back"
+            size={23}
+            color={C.text}
+          />
+        </Pressable>
+
+        <Text style={styles.headerTitle}>
+          Checkout
+        </Text>
+
+        <View
+          style={styles.headerPlaceholder}
+        />
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={
+          styles.content
+        }
+      >
+        {/* ==========================================
+            DELIVERY ADDRESS
+        ========================================== */}
+
+        <View style={styles.section}>
+          <View
+            style={styles.sectionTitleRow}
+          >
+            <View style={styles.sectionIcon}>
+              <Ionicons
+                name="location-outline"
+                size={20}
+                color={C.maroon}
+              />
+            </View>
+
+            <View>
+              <Text
+                style={styles.sectionTitle}
+              >
+                Delivery Address
+              </Text>
+
+              <Text
+                style={styles.sectionSubtitle}
+              >
+                Where should we deliver your order?
+              </Text>
+            </View>
+          </View>
+
+          {/* SAVED ADDRESS BUTTON */}
+
+          {savedAddresses.length > 0 && (
+            <Pressable
+              style={styles.savedAddressButton}
+              onPress={() =>
+                setShowSavedAddresses(
+                  !showSavedAddresses
+                )
+              }
+              disabled={placingOrder}
+            >
+              <View
+                style={
+                  styles.savedAddressLeft
+                }
+              >
+                <Ionicons
+                  name="bookmark-outline"
+                  size={20}
+                  color={C.maroon}
+                />
+
+                <View
+                  style={
+                    styles.savedAddressText
+                  }
+                >
+                  <Text
+                    style={
+                      styles.savedAddressTitle
+                    }
+                  >
+                    Use Saved Address
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.savedAddressSubtitle
+                    }
+                  >
+                    {savedAddresses.length}{' '}
+                    saved{' '}
+                    {savedAddresses.length === 1
+                      ? 'address'
+                      : 'addresses'}
+                  </Text>
+                </View>
+              </View>
+
+              <Ionicons
+                name={
+                  showSavedAddresses
+                    ? 'chevron-up'
+                    : 'chevron-down'
+                }
+                size={20}
+                color={C.muted}
+              />
+            </Pressable>
+          )}
+
+          {/* SAVED ADDRESS LIST */}
+
+          {showSavedAddresses &&
+            savedAddresses.length > 0 && (
+              <View
+                style={
+                  styles.savedAddressList
+                }
+              >
+                {savedAddresses.map(
+                  (item) => (
+                    <Pressable
+                      key={item.id}
+                      style={[
+                        styles.savedAddressCard,
+                        item.isDefault &&
+                          styles.savedAddressCardDefault,
+                      ]}
+                      onPress={() =>
+                        selectSavedAddress(
+                          item
+                        )
+                      }
+                      disabled={placingOrder}
+                    >
+                      <View
+                        style={
+                          styles.savedAddressCardTop
+                        }
+                      >
+                        <View
+                          style={
+                            styles.savedAddressLabelRow
+                          }
+                        >
+                          <Text
+                            style={
+                              styles.savedAddressLabel
+                            }
+                          >
+                            {item.label}
+                          </Text>
+
+                          {item.isDefault && (
+                            <View
+                              style={
+                                styles.defaultBadge
+                              }
+                            >
+                              <Text
+                                style={
+                                  styles.defaultBadgeText
+                                }
+                              >
+                                DEFAULT
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+
+                        <Ionicons
+                          name="checkmark-circle-outline"
+                          size={22}
+                          color={C.green}
+                        />
+                      </View>
+
+                      <Text
+                        style={
+                          styles.savedAddressName
+                        }
+                      >
+                        {item.fullName}
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.savedAddressPhone
+                        }
+                      >
+                        {item.phone}
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.savedAddressDetails
+                        }
+                      >
+                        {item.address}
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.savedAddressDetails
+                        }
+                      >
+                        {item.city} -{' '}
+                        {item.pincode}
+                      </Text>
+                    </Pressable>
+                  )
+                )}
+              </View>
+            )}
+
+          {/* FULL NAME */}
+
+          <Text style={styles.label}>
+            Full Name
+          </Text>
+
           <TextInput
-            value={name}
-            onChangeText={(value) => {
-              setName(value);
-              setSelectedAddressId(null);
-            }}
-            placeholder="Enter recipient name"
-            placeholderTextColor="#A69A8D"
+            value={fullName}
+            onChangeText={setFullName}
+            placeholder="Enter your full name"
+            placeholderTextColor="#A69A91"
             style={styles.input}
+            editable={!placingOrder}
           />
 
-          <Text style={styles.inputLabel}>Phone number</Text>
+          {/* PHONE */}
+
+          <Text style={styles.label}>
+            Phone Number
+          </Text>
+
           <TextInput
             value={phone}
-            onChangeText={(value) => {
-              setPhone(value.replace(/[^0-9]/g, '').slice(0, 10));
-              setSelectedAddressId(null);
-            }}
+            onChangeText={setPhone}
             placeholder="10-digit mobile number"
-            placeholderTextColor="#A69A8D"
+            placeholderTextColor="#A69A91"
             keyboardType="phone-pad"
             maxLength={10}
             style={styles.input}
+            editable={!placingOrder}
           />
 
-          <Text style={styles.inputLabel}>Full address</Text>
+          {/* ADDRESS */}
+
+          <Text style={styles.label}>
+            Complete Address
+          </Text>
+
           <TextInput
             value={address}
-            onChangeText={(value) => {
-              setAddress(value);
-              setSelectedAddressId(null);
-            }}
-            placeholder="House, street, area and PIN code"
-            placeholderTextColor="#A69A8D"
+            onChangeText={setAddress}
+            placeholder="House no., street, area"
+            placeholderTextColor="#A69A91"
             multiline
-            style={[styles.input, styles.multilineInput]}
+            numberOfLines={3}
+            textAlignVertical="top"
+            style={[
+              styles.input,
+              styles.addressInput,
+            ]}
+            editable={!placingOrder}
           />
 
-          <Text style={styles.inputLabel}>City / Town</Text>
-          <TextInput
-            value={city}
-            onChangeText={(value) => {
-              setCity(value);
-              setSelectedAddressId(null);
-            }}
-            placeholder="Enter city or town"
-            placeholderTextColor="#A69A8D"
-            style={styles.input}
-          />
-        </View>
+          {/* CITY + PINCODE */}
 
-        {/* ORDER SUMMARY */}
-        <View style={styles.section}>
-          <View style={styles.sectionTitleRow}>
-            <Text style={styles.sectionIcon}>🛒</Text>
-            <Text style={styles.sectionTitle}>Order summary</Text>
-          </View>
-
-          {items.length === 0 ? (
-            <Text style={styles.helperText}>
-              Your cart is empty.
-            </Text>
-          ) : (
-            items.map((item) => (
-              <View key={item.id} style={styles.productRow}>
-                <View style={styles.productEmojiBox}>
-                  <Text style={styles.productEmoji}>
-                    {item.emoji}
-                  </Text>
-                </View>
-
-                <View style={styles.productDetails}>
-                  <Text style={styles.productName}>
-                    {item.name}
-                  </Text>
-                  <Text style={styles.productQuantity}>
-                    Qty: {item.quantity}
-                  </Text>
-                </View>
-
-                <Text style={styles.productPrice}>
-                  ₹{(item.price * item.quantity).toFixed(2)}
-                </Text>
-              </View>
-            ))
-          )}
-
-          <View style={styles.divider} />
-
-          <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Subtotal</Text>
-            <Text style={styles.priceValue}>
-              ₹{subtotal.toFixed(2)}
-            </Text>
-          </View>
-
-          <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Delivery fee</Text>
-            <Text
-              style={[
-                styles.priceValue,
-                deliveryFee === 0 && styles.freeDelivery,
-              ]}
+          <View style={styles.row}>
+            <View
+              style={
+                styles.halfInputContainer
+              }
             >
-              {deliveryFee === 0
-                ? 'FREE'
-                : `₹${deliveryFee.toFixed(2)}`}
-            </Text>
-          </View>
+              <Text style={styles.label}>
+                City
+              </Text>
 
-          {deliveryFee > 0 && (
-            <Text style={styles.deliveryHint}>
-              Add ₹{(499 - subtotal).toFixed(2)} more for free delivery.
-            </Text>
-          )}
+              <TextInput
+                value={city}
+                onChangeText={setCity}
+                placeholder="City"
+                placeholderTextColor="#A69A91"
+                style={styles.input}
+                editable={!placingOrder}
+              />
+            </View>
 
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>
-              ₹{total.toFixed(2)}
-            </Text>
+            <View
+              style={
+                styles.halfInputContainer
+              }
+            >
+              <Text style={styles.label}>
+                Pincode
+              </Text>
+
+              <TextInput
+                value={pincode}
+                onChangeText={setPincode}
+                placeholder="6-digit pincode"
+                placeholderTextColor="#A69A91"
+                keyboardType="number-pad"
+                maxLength={6}
+                style={styles.input}
+                editable={!placingOrder}
+              />
+            </View>
           </View>
         </View>
 
-        {/* PAYMENT */}
+        {/* ==========================================
+            PAYMENT
+        ========================================== */}
+
         <View style={styles.section}>
-          <View style={styles.sectionTitleRow}>
-            <Text style={styles.sectionIcon}>💳</Text>
-            <Text style={styles.sectionTitle}>Payment method</Text>
+          <View
+            style={styles.sectionTitleRow}
+          >
+            <View style={styles.sectionIcon}>
+              <Ionicons
+                name="card-outline"
+                size={20}
+                color={C.maroon}
+              />
+            </View>
+
+            <View>
+              <Text
+                style={styles.sectionTitle}
+              >
+                Payment Method
+              </Text>
+
+              <Text
+                style={styles.sectionSubtitle}
+              >
+                Select your preferred payment method
+              </Text>
+            </View>
           </View>
 
           <Pressable
-            onPress={() => setPaymentMethod('COD')}
             style={[
               styles.paymentOption,
-              paymentMethod === 'COD' && styles.paymentOptionSelected,
+              paymentMethod === 'cod' &&
+                styles.paymentOptionSelected,
             ]}
+            onPress={() =>
+              setPaymentMethod('cod')
+            }
+            disabled={placingOrder}
           >
-            <Text style={styles.paymentEmoji}>💵</Text>
+            <View style={styles.paymentLeft}>
+              <View
+                style={styles.paymentIcon}
+              >
+                <Ionicons
+                  name="cash-outline"
+                  size={23}
+                  color={C.green}
+                />
+              </View>
 
-            <View style={styles.paymentDetails}>
-              <Text style={styles.paymentTitle}>
-                Cash on Delivery
-              </Text>
-              <Text style={styles.paymentSubtitle}>
-                Pay when your order arrives
-              </Text>
+              <View>
+                <Text
+                  style={styles.paymentTitle}
+                >
+                  Cash on Delivery
+                </Text>
+
+                <Text
+                  style={
+                    styles.paymentSubtitle
+                  }
+                >
+                  Pay when your order arrives
+                </Text>
+              </View>
             </View>
 
             <View
               style={[
                 styles.radio,
-                paymentMethod === 'COD' && styles.radioSelected,
+                paymentMethod === 'cod' &&
+                  styles.radioSelected,
               ]}
             >
-              {paymentMethod === 'COD' && (
-                <View style={styles.radioInner} />
+              {paymentMethod === 'cod' && (
+                <View
+                  style={styles.radioDot}
+                />
               )}
             </View>
           </Pressable>
 
-          <View style={[styles.paymentOption, styles.disabledPayment]}>
-            <Text style={styles.paymentEmoji}>📱</Text>
+          <View style={styles.comingSoon}>
+            <Ionicons
+              name="information-circle-outline"
+              size={18}
+              color={C.gold}
+            />
 
-            <View style={styles.paymentDetails}>
-              <Text style={styles.paymentTitle}>
-                Online payment
-              </Text>
-              <Text style={styles.paymentSubtitle}>
-                Coming soon
-              </Text>
-            </View>
-
-            <Text style={styles.comingSoon}>Soon</Text>
+            <Text
+              style={styles.comingSoonText}
+            >
+              Online payments will be available
+              soon.
+            </Text>
           </View>
         </View>
 
-        <View style={styles.secureNote}>
-          <Text style={styles.secureIcon}>🔒</Text>
-          <Text style={styles.secureText}>
-            Your order details are saved on this device.
+        {/* ==========================================
+            ORDER ITEMS
+        ========================================== */}
+
+        <View style={styles.section}>
+          <View
+            style={styles.sectionTitleRow}
+          >
+            <View style={styles.sectionIcon}>
+              <Ionicons
+                name="bag-handle-outline"
+                size={20}
+                color={C.maroon}
+              />
+            </View>
+
+            <View>
+              <Text
+                style={styles.sectionTitle}
+              >
+                Your Order
+              </Text>
+
+              <Text
+                style={styles.sectionSubtitle}
+              >
+                {items.length}{' '}
+                {items.length === 1
+                  ? 'item'
+                  : 'items'}
+              </Text>
+            </View>
+          </View>
+
+          {items.map((item) => (
+            <View
+              key={item.id}
+              style={styles.orderItem}
+            >
+              <View
+                style={styles.productEmoji}
+              >
+                <Text
+                  style={styles.emoji}
+                >
+                  {item.emoji}
+                </Text>
+              </View>
+
+              <View
+                style={styles.productInfo}
+              >
+                <Text
+                  style={styles.productName}
+                  numberOfLines={2}
+                >
+                  {item.name}
+                </Text>
+
+                <Text
+                  style={styles.quantity}
+                >
+                  Qty: {item.quantity}
+                </Text>
+              </View>
+
+              <Text
+                style={styles.productPrice}
+              >
+                ₹
+                {(
+                  item.price *
+                  item.quantity
+                ).toFixed(0)}
+              </Text>
+            </View>
+          ))}
+        </View>
+
+        {/* ==========================================
+            PRICE SUMMARY
+        ========================================== */}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Price Details
+          </Text>
+
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>
+              Subtotal
+            </Text>
+
+            <Text style={styles.priceValue}>
+              ₹{subtotal.toFixed(0)}
+            </Text>
+          </View>
+
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>
+              Delivery Fee
+            </Text>
+
+            <Text
+              style={[
+                styles.priceValue,
+                deliveryFee === 0 &&
+                  styles.freeText,
+              ]}
+            >
+              {deliveryFee === 0
+                ? 'FREE'
+                : `₹${deliveryFee}`}
+            </Text>
+          </View>
+
+          {deliveryFee > 0 && (
+            <Text style={styles.deliveryHint}>
+              Add ₹{499 - subtotal} more to get
+              free delivery.
+            </Text>
+          )}
+
+          <View style={styles.divider} />
+
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>
+              Total Amount
+            </Text>
+
+            <Text style={styles.totalValue}>
+              ₹{total.toFixed(0)}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.bottomSpace} />
+      </ScrollView>
+
+      {/* ==========================================
+          BOTTOM PLACE ORDER BAR
+      ========================================== */}
+
+      <View style={styles.bottomBar}>
+        <View>
+          <Text style={styles.bottomLabel}>
+            Total
+          </Text>
+
+          <Text style={styles.bottomTotal}>
+            ₹{total.toFixed(0)}
           </Text>
         </View>
 
         <Pressable
           style={[
             styles.placeOrderButton,
-            (placingOrder || items.length === 0) &&
-              styles.buttonDisabled,
+            placingOrder &&
+              styles.placeOrderButtonDisabled,
           ]}
           onPress={placeOrder}
-          disabled={placingOrder || items.length === 0}
+          disabled={placingOrder}
         >
-          {placingOrder ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.placeOrderText}>
-              Place order · ₹{total.toFixed(2)}
-            </Text>
+          <Text style={styles.placeOrderText}>
+            {placingOrder
+              ? 'Placing Order...'
+              : 'Place Order'}
+          </Text>
+
+          {!placingOrder && (
+            <Ionicons
+              name="arrow-forward"
+              size={20}
+              color={C.white}
+            />
           )}
         </Pressable>
-
-        <Text style={styles.bottomNote}>
-          By placing your order, you confirm your delivery details.
-        </Text>
-      </ScrollView>
-    </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
+// ==================================================
+// STYLES
+// ==================================================
+
 const styles = StyleSheet.create({
-  screen: {
+  safeArea: {
     flex: 1,
-    backgroundColor: CREAM,
+    backgroundColor: C.cream,
   },
 
-  content: {
-    padding: 18,
-    paddingBottom: 40,
-    width: '100%',
-    maxWidth: 760,
-    alignSelf: 'center',
-  },
-
-  heading: {
-    marginBottom: 20,
-  },
-
-  title: {
-    fontSize: 27,
-    fontWeight: '800',
-    color: DARK_MAROON,
-  },
-
-  subtitle: {
-    color: MUTED,
-    fontSize: 14,
-    marginTop: 5,
-  },
-
-  section: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: BORDER,
-  },
-
-  sectionHeading: {
+  header: {
+    height: 64,
+    backgroundColor: C.white,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#F7F1EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: C.text,
+  },
+
+  headerPlaceholder: {
+    width: 42,
+  },
+
+  content: {
+    padding: 16,
+    paddingBottom: 30,
+  },
+
+  section: {
+    backgroundColor: C.white,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: C.border,
   },
 
   sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 18,
   },
 
   sectionIcon: {
-    fontSize: 19,
-    marginRight: 9,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#F7EDEF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
 
   sectionTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: DARK_MAROON,
+    color: C.text,
   },
 
-  link: {
-    color: MAROON,
-    fontWeight: '800',
-    fontSize: 13,
+  sectionSubtitle: {
+    fontSize: 12,
+    color: C.muted,
+    marginTop: 3,
   },
 
-  helperText: {
-    color: MUTED,
-    fontSize: 13,
-    lineHeight: 20,
-    marginBottom: 12,
-  },
+  // ==================================================
+  // SAVED ADDRESS STYLES
+  // ==================================================
 
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-  },
-
-  loadingText: {
-    color: MUTED,
-    marginLeft: 10,
-    fontSize: 13,
-  },
-
-  addressOption: {
+  savedAddressButton: {
+    minHeight: 58,
     borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 13,
-    padding: 14,
-    marginBottom: 10,
-    backgroundColor: '#FFFEFC',
-  },
-
-  addressOptionSelected: {
-    borderColor: MAROON,
-    backgroundColor: '#FCF4F5',
-  },
-
-  addressOptionTop: {
+    borderColor: C.gold,
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-
-  addressLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    flex: 1,
-  },
-
-  addressEmoji: {
-    fontSize: 17,
-    marginRight: 7,
-  },
-
-  addressLabel: {
-    color: DARK_MAROON,
-    fontWeight: '800',
-    fontSize: 14,
-  },
-
-  defaultTag: {
-    marginLeft: 8,
-    color: GREEN,
-    fontSize: 9,
-    fontWeight: '800',
-  },
-
-  radio: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#C9BBAE',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 10,
-  },
-
-  radioSelected: {
-    borderColor: MAROON,
-  },
-
-  radioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: MAROON,
-  },
-
-  addressRecipient: {
-    color: '#30251F',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 5,
-  },
-
-  addressText: {
-    color: '#66594E',
-    fontSize: 13,
-    lineHeight: 20,
-  },
-
-  addressPhone: {
-    color: MUTED,
-    fontSize: 12,
-    marginTop: 7,
-  },
-
-  addAddressButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-
-  addAddressText: {
-    color: MAROON,
-    fontWeight: '800',
-    fontSize: 13,
-  },
-
-  noAddressBox: {
-    backgroundColor: '#FFFEFC',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: BORDER,
-  },
-
-  noAddressTitle: {
-    color: DARK_MAROON,
-    fontWeight: '800',
-    fontSize: 15,
+    backgroundColor: '#FFF9F0',
     marginBottom: 8,
   },
 
-  primaryButton: {
-    backgroundColor: MAROON,
-    borderRadius: 11,
+  savedAddressLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 13,
-    marginTop: 4,
+    flex: 1,
   },
 
-  primaryButtonText: {
-    color: '#FFFFFF',
+  savedAddressText: {
+    marginLeft: 10,
+  },
+
+  savedAddressTitle: {
+    fontSize: 14,
     fontWeight: '800',
+    color: C.text,
+  },
+
+  savedAddressSubtitle: {
+    fontSize: 11,
+    color: C.muted,
+    marginTop: 2,
+  },
+
+  savedAddressList: {
+    marginBottom: 8,
+  },
+
+  savedAddressCard: {
+    backgroundColor: '#FFFCF9',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 14,
+    padding: 13,
+    marginTop: 8,
+  },
+
+  savedAddressCardDefault: {
+    borderColor: C.green,
+    backgroundColor: C.lightGreen,
+  },
+
+  savedAddressCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+
+  savedAddressLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  savedAddressLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: C.darkMaroon,
+  },
+
+  defaultBadge: {
+    backgroundColor: '#E1EFE4',
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    marginLeft: 8,
+  },
+
+  defaultBadgeText: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: C.green,
+  },
+
+  savedAddressName: {
     fontSize: 13,
-  },
-
-  manualTitle: {
-    color: DARK_MAROON,
-    fontWeight: '800',
-    fontSize: 15,
-    marginTop: 16,
-    marginBottom: 14,
-  },
-
-  inputLabel: {
-    color: '#51443A',
-    fontSize: 12,
     fontWeight: '700',
+    color: C.text,
+    marginBottom: 2,
+  },
+
+  savedAddressPhone: {
+    fontSize: 12,
+    color: C.muted,
     marginBottom: 7,
-    marginTop: 12,
+  },
+
+  savedAddressDetails: {
+    fontSize: 12,
+    color: C.muted,
+    lineHeight: 18,
+  },
+
+  // ==================================================
+  // FORM
+  // ==================================================
+
+  label: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.text,
+    marginBottom: 7,
+    marginTop: 10,
   },
 
   input: {
+    minHeight: 48,
     borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderColor: C.border,
+    borderRadius: 12,
+    paddingHorizontal: 13,
+    backgroundColor: '#FFFCF9',
+    color: C.text,
     fontSize: 14,
-    color: '#30251F',
-    backgroundColor: '#FFFEFC',
   },
 
-  multilineInput: {
-    minHeight: 78,
-    textAlignVertical: 'top',
+  addressInput: {
+    minHeight: 82,
+    paddingTop: 13,
   },
 
-  productRow: {
+  row: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+
+  halfInputContainer: {
+    flex: 1,
+  },
+
+  // ==================================================
+  // PAYMENT
+  // ==================================================
+
+  paymentOption: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 14,
+    padding: 13,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    justifyContent: 'space-between',
   },
 
-  productEmojiBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 11,
-    backgroundColor: '#F8F1E7',
+  paymentOptionSelected: {
+    borderColor: C.green,
+    backgroundColor: C.lightGreen,
+  },
+
+  paymentLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+
+  paymentIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: C.white,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 11,
   },
 
-  productEmoji: {
-    fontSize: 23,
+  paymentTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: C.text,
   },
 
-  productDetails: {
+  paymentSubtitle: {
+    fontSize: 12,
+    color: C.muted,
+    marginTop: 3,
+  },
+
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#B9ADA3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  radioSelected: {
+    borderColor: C.green,
+  },
+
+  radioDot: {
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: C.green,
+  },
+
+  comingSoon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: '#FBF7EE',
+  },
+
+  comingSoonText: {
     flex: 1,
+    fontSize: 12,
+    color: C.muted,
+    marginLeft: 7,
+  },
+
+  // ==================================================
+  // ORDER ITEMS
+  // ==================================================
+
+  orderItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1EAE3',
+  },
+
+  productEmoji: {
+    width: 50,
+    height: 50,
+    borderRadius: 13,
+    backgroundColor: '#FAF4EC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  emoji: {
+    fontSize: 27,
+  },
+
+  productInfo: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 10,
   },
 
   productName: {
-    color: '#30251F',
-    fontWeight: '700',
     fontSize: 13,
+    fontWeight: '700',
+    color: C.text,
+    lineHeight: 18,
   },
 
-  productQuantity: {
-    color: MUTED,
+  quantity: {
     fontSize: 12,
+    color: C.muted,
     marginTop: 4,
   },
 
   productPrice: {
-    color: DARK_MAROON,
+    fontSize: 14,
     fontWeight: '800',
-    fontSize: 13,
-    marginLeft: 8,
+    color: C.text,
   },
 
-  divider: {
-    height: 1,
-    backgroundColor: BORDER,
-    marginVertical: 12,
-  },
+  // ==================================================
+  // PRICE
+  // ==================================================
 
   priceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginVertical: 7,
+    alignItems: 'center',
+    marginTop: 13,
   },
 
   priceLabel: {
-    color: MUTED,
     fontSize: 14,
+    color: C.muted,
   },
 
   priceValue: {
-    color: '#30251F',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
+    color: C.text,
   },
 
-  freeDelivery: {
-    color: GREEN,
-    fontWeight: '800',
+  freeText: {
+    color: C.green,
   },
 
   deliveryHint: {
-    color: GREEN,
-    fontSize: 12,
-    marginTop: 3,
-    marginBottom: 7,
+    fontSize: 11,
+    color: C.green,
+    marginTop: 7,
+  },
+
+  divider: {
+    height: 1,
+    backgroundColor: C.border,
+    marginVertical: 16,
   },
 
   totalRow: {
-    borderTopWidth: 1,
-    borderTopColor: BORDER,
-    marginTop: 12,
-    paddingTop: 15,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
   },
 
   totalLabel: {
-    color: DARK_MAROON,
     fontSize: 16,
     fontWeight: '800',
+    color: C.text,
   },
 
   totalValue: {
-    color: MAROON,
-    fontSize: 19,
+    fontSize: 20,
     fontWeight: '900',
+    color: C.maroon,
   },
 
-  paymentOption: {
+  bottomSpace: {
+    height: 80,
+  },
+
+  // ==================================================
+  // BOTTOM BAR
+  // ==================================================
+
+  bottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: C.white,
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+    paddingHorizontal: 16,
+    paddingTop: 11,
+    paddingBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 12,
-    padding: 13,
-    marginTop: 10,
+    justifyContent: 'space-between',
   },
 
-  paymentOptionSelected: {
-    borderColor: MAROON,
-    backgroundColor: '#FCF4F5',
-  },
-
-  disabledPayment: {
-    opacity: 0.65,
-  },
-
-  paymentEmoji: {
-    fontSize: 23,
-    marginRight: 12,
-  },
-
-  paymentDetails: {
-    flex: 1,
-  },
-
-  paymentTitle: {
-    color: DARK_MAROON,
-    fontWeight: '800',
-    fontSize: 14,
-  },
-
-  paymentSubtitle: {
-    color: MUTED,
-    fontSize: 12,
-    marginTop: 4,
-  },
-
-  comingSoon: {
-    color: MUTED,
+  bottomLabel: {
     fontSize: 11,
-    fontWeight: '700',
+    color: C.muted,
   },
 
-  secureNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-
-  secureIcon: {
-    fontSize: 13,
-    marginRight: 7,
-  },
-
-  secureText: {
-    color: MUTED,
-    fontSize: 12,
+  bottomTotal: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: C.text,
+    marginTop: 2,
   },
 
   placeOrderButton: {
-    backgroundColor: MAROON,
+    height: 50,
+    paddingHorizontal: 20,
     borderRadius: 14,
-    paddingVertical: 17,
+    backgroundColor: C.maroon,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 54,
+    gap: 8,
   },
 
-  buttonDisabled: {
-    opacity: 0.55,
+  placeOrderButtonDisabled: {
+    opacity: 0.65,
   },
 
   placeOrderText: {
-    color: '#FFFFFF',
+    color: C.white,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '800',
   },
 
-  bottomNote: {
+  // ==================================================
+  // EMPTY CART
+  // ==================================================
+
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 35,
+  },
+
+  emptyIcon: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#F7EDEF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: C.text,
+  },
+
+  emptyText: {
     textAlign: 'center',
-    color: MUTED,
-    fontSize: 11,
-    lineHeight: 17,
-    marginTop: 13,
+    fontSize: 14,
+    color: C.muted,
+    lineHeight: 21,
+    marginTop: 9,
+  },
+
+  shopButton: {
+    marginTop: 24,
+    backgroundColor: C.maroon,
+    borderRadius: 13,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+  },
+
+  shopButtonText: {
+    color: C.white,
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 
 import { useCart } from '@/context/CartContext';
-import { PRODUCTS } from '@/data/products';
+import { getProduct } from '@/services/api';
 
 const C = {
   background: '#F7F5EE',
@@ -32,6 +32,27 @@ const C = {
   white: '#FFFFFF',
 };
 
+type ProductDetailsProduct = {
+  id: string;
+  name: string;
+  category: string;
+  department: string;
+  price: number;
+  oldPrice?: number;
+  mrp: number;
+  quantity: string;
+  stock: number;
+  image?: string;
+  description: string;
+  rating: number;
+  ratingCount: number;
+  emoji: string;
+  quality: string;
+  availability: string;
+  freshness?: string;
+  origin?: string;
+};
+
 export default function ProductDetailsScreen() {
   const router = useRouter();
 
@@ -45,26 +66,182 @@ export default function ProductDetailsScreen() {
     ? params.id[0]
     : params.id;
 
-  const product = PRODUCTS.find(
-    (item) => item.id === productId
-  );
+  const [product, setProduct] =
+    useState<ProductDetailsProduct | null>(null);
 
-  const existingQuantity = product
-    ? items.find((item) => item.id === product.id)?.quantity ?? 0
-    : 0;
+  const [loadingProduct, setLoadingProduct] =
+    useState(true);
+
+  const [productError, setProductError] =
+    useState('');
 
   const [quantity, setQuantity] = useState(1);
-  const [isFavorite, setIsFavorite] = useState(false);
 
-  // Keep quantity synced if the product already exists in cart.
+  const [isFavorite, setIsFavorite] =
+    useState(false);
+
+  /*
+   * LOAD PRODUCT FROM BACKEND
+   */
   useEffect(() => {
+    let mounted = true;
+
+    const loadProduct = async () => {
+      if (!productId) {
+        if (mounted) {
+          setProductError('Product ID is missing.');
+          setLoadingProduct(false);
+        }
+
+        return;
+      }
+
+      try {
+        setLoadingProduct(true);
+        setProductError('');
+
+        const apiProduct = await getProduct(productId);
+
+        if (!mounted) {
+          return;
+        }
+
+        if (!apiProduct) {
+          setProduct(null);
+          setProductError(
+            'We could not find this product.'
+          );
+
+          return;
+        }
+
+        const stock = apiProduct.stock ?? 0;
+
+        setProduct({
+          id: apiProduct._id,
+          name: apiProduct.name,
+          category: apiProduct.category,
+          department: apiProduct.department,
+          price: apiProduct.price,
+          oldPrice:
+            apiProduct.mrp > apiProduct.price
+              ? apiProduct.mrp
+              : undefined,
+          mrp: apiProduct.mrp,
+          quantity: apiProduct.quantity,
+          stock,
+          image: apiProduct.image || undefined,
+          description:
+            apiProduct.description ||
+            'No description available.',
+          rating: apiProduct.rating ?? 0,
+          ratingCount: apiProduct.ratingCount ?? 0,
+          emoji: '🛒',
+          quality: 'Quality Checked',
+          availability:
+            stock > 0
+              ? 'In Stock'
+              : 'Out of Stock',
+        });
+      } catch (error) {
+        console.error(
+          'Product details error:',
+          error
+        );
+
+        if (mounted) {
+          setProduct(null);
+
+          setProductError(
+            'Unable to load this product. Please check your connection and try again.'
+          );
+        }
+      } finally {
+        if (mounted) {
+          setLoadingProduct(false);
+        }
+      }
+    };
+
+    loadProduct();
+
+    return () => {
+      mounted = false;
+    };
+  }, [productId]);
+
+  /*
+   * CURRENT QUANTITY IN CART
+   */
+  const existingQuantity = product
+    ? items.find(
+        (item) => item.id === product.id
+      )?.quantity ?? 0
+    : 0;
+
+  /*
+   * KEEP QUANTITY SELECTOR
+   * SYNCED WITH CART
+   */
+  useEffect(() => {
+    if (!product) {
+      setQuantity(1);
+      return;
+    }
+
+    if (product.stock <= 0) {
+      setQuantity(1);
+      return;
+    }
+
     if (existingQuantity > 0) {
-      setQuantity(existingQuantity);
+      setQuantity(
+        Math.min(
+          existingQuantity,
+          product.stock
+        )
+      );
     } else {
       setQuantity(1);
     }
-  }, [productId, existingQuantity]);
+  }, [
+    productId,
+    existingQuantity,
+    product?.stock,
+  ]);
 
+  /*
+   * LOADING SCREEN
+   */
+  if (loadingProduct) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={C.background}
+        />
+
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorEmoji}>
+            🛍️
+          </Text>
+
+          <Text style={styles.errorTitle}>
+            Loading product...
+          </Text>
+
+          <Text style={styles.errorSubtitle}>
+            Please wait while we get the latest
+            product details.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  /*
+   * PRODUCT NOT FOUND
+   */
   if (!product) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -74,14 +251,17 @@ export default function ProductDetailsScreen() {
         />
 
         <View style={styles.errorContainer}>
-          <Text style={styles.errorEmoji}>🔎</Text>
+          <Text style={styles.errorEmoji}>
+            🔎
+          </Text>
 
           <Text style={styles.errorTitle}>
             Product not found
           </Text>
 
           <Text style={styles.errorSubtitle}>
-            We couldn't find this product.
+            {productError ||
+              "We couldn't find this product."}
           </Text>
 
           <Pressable
@@ -97,22 +277,56 @@ export default function ProductDetailsScreen() {
     );
   }
 
-  const totalPrice = product.price * quantity;
+  const totalPrice =
+    product.price * quantity;
 
   const cartItemCount = items.reduce(
-    (total, item) => total + item.quantity,
+    (total, item) =>
+      total + item.quantity,
     0
   );
 
+  /*
+   * ADD SELECTED QUANTITY TO CART
+   */
   const addSelectedQuantityToCart = () => {
-    const currentQuantity =
-      items.find((item) => item.id === product.id)?.quantity ?? 0;
+    if (product.stock <= 0) {
+      Alert.alert(
+        'Out of stock',
+        'This product is currently unavailable.'
+      );
 
+      return;
+    }
+
+    if (quantity > product.stock) {
+      Alert.alert(
+        'Limited stock',
+        `Only ${product.stock} ${product.quantity} available.`
+      );
+
+      setQuantity(product.stock);
+
+      return;
+    }
+
+    const currentQuantity =
+      items.find(
+        (item) => item.id === product.id
+      )?.quantity ?? 0;
+
+    /*
+     * The quantity selector represents
+     * the final quantity desired.
+     */
     const additionalQuantity = Math.max(
       quantity - currentQuantity,
       0
     );
 
+    /*
+     * Already has the requested quantity
+     */
     if (additionalQuantity === 0) {
       Alert.alert(
         'Already in cart',
@@ -124,7 +338,8 @@ export default function ProductDetailsScreen() {
           },
           {
             text: 'View Cart',
-            onPress: () => router.push('/cart'),
+            onPress: () =>
+              router.push('/cart'),
           },
         ]
       );
@@ -132,12 +347,23 @@ export default function ProductDetailsScreen() {
       return;
     }
 
-    for (let i = 0; i < additionalQuantity; i++) {
+    /*
+     * Add only the additional quantity.
+     *
+     * IMPORTANT:
+     * stock is required by CartContext.
+     */
+    for (
+      let i = 0;
+      i < additionalQuantity;
+      i++
+    ) {
       addToCart({
         id: product.id,
         name: product.name,
         price: product.price,
         emoji: product.emoji,
+        stock: product.stock,
       });
     }
 
@@ -151,39 +377,91 @@ export default function ProductDetailsScreen() {
         },
         {
           text: 'View Cart',
-          onPress: () => router.push('/cart'),
+          onPress: () =>
+            router.push('/cart'),
         },
       ]
     );
   };
 
+  /*
+   * BUY NOW
+   */
   const buyNow = () => {
+    if (product.stock <= 0) {
+      Alert.alert(
+        'Out of stock',
+        'This product is currently unavailable.'
+      );
+
+      return;
+    }
+
+    if (quantity > product.stock) {
+      Alert.alert(
+        'Limited stock',
+        `Only ${product.stock} ${product.quantity} available.`
+      );
+
+      setQuantity(product.stock);
+
+      return;
+    }
+
     const currentQuantity =
-      items.find((item) => item.id === product.id)?.quantity ?? 0;
+      items.find(
+        (item) => item.id === product.id
+      )?.quantity ?? 0;
 
     const additionalQuantity = Math.max(
       quantity - currentQuantity,
       0
     );
 
-    for (let i = 0; i < additionalQuantity; i++) {
+    /*
+     * Add only the quantity required
+     * to reach the selected quantity.
+     */
+    for (
+      let i = 0;
+      i < additionalQuantity;
+      i++
+    ) {
       addToCart({
         id: product.id,
         name: product.name,
         price: product.price,
         emoji: product.emoji,
+        stock: product.stock,
       });
     }
 
     router.push('/cart');
   };
 
+  /*
+   * DECREASE QUANTITY
+   */
   const decreaseQuantity = () => {
-    setQuantity((current) => Math.max(1, current - 1));
+    setQuantity((current) =>
+      Math.max(1, current - 1)
+    );
   };
 
+  /*
+   * INCREASE QUANTITY
+   */
   const increaseQuantity = () => {
-    setQuantity((current) => current + 1);
+    if (product.stock <= 0) {
+      return;
+    }
+
+    setQuantity((current) =>
+      Math.min(
+        product.stock,
+        current + 1
+      )
+    );
   };
 
   return (
@@ -233,20 +511,28 @@ export default function ProductDetailsScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={
+          styles.scrollContent
+        }
       >
         {/* PRODUCT IMAGE */}
 
         <View style={styles.imageContainer}>
           {product.image ? (
             <Image
-              source={{ uri: product.image }}
+              source={{
+                uri: product.image,
+              }}
               style={styles.productImage}
               resizeMode="cover"
             />
           ) : (
-            <View style={styles.emojiContainer}>
-              <Text style={styles.productEmoji}>
+            <View
+              style={styles.emojiContainer}
+            >
+              <Text
+                style={styles.productEmoji}
+              >
                 {product.emoji}
               </Text>
             </View>
@@ -263,7 +549,9 @@ export default function ProductDetailsScreen() {
           <Pressable
             style={styles.favoriteButton}
             onPress={() =>
-              setIsFavorite((current) => !current)
+              setIsFavorite(
+                (current) => !current
+              )
             }
           >
             <Ionicons
@@ -286,24 +574,34 @@ export default function ProductDetailsScreen() {
 
         <View style={styles.infoCard}>
           <View style={styles.categoryRow}>
-            <View style={styles.categoryBadge}>
-              <Text style={styles.categoryText}>
+            <View
+              style={styles.categoryBadge}
+            >
+              <Text
+                style={styles.categoryText}
+              >
                 {product.category}
               </Text>
             </View>
 
-            <View style={styles.ratingBadge}>
+            <View
+              style={styles.ratingBadge}
+            >
               <Ionicons
                 name="star"
                 size={14}
                 color={C.goldDark}
               />
 
-              <Text style={styles.ratingValue}>
+              <Text
+                style={styles.ratingValue}
+              >
                 {product.rating}
               </Text>
 
-              <Text style={styles.ratingCount}>
+              <Text
+                style={styles.ratingCount}
+              >
                 ({product.ratingCount})
               </Text>
             </View>
@@ -313,28 +611,39 @@ export default function ProductDetailsScreen() {
             {product.name}
           </Text>
 
-          <Text style={styles.departmentText}>
+          <Text
+            style={styles.departmentText}
+          >
             {product.department}
           </Text>
 
           {/* PRICE */}
 
-          <View style={styles.priceContainer}>
+          <View
+            style={styles.priceContainer}
+          >
             <Text style={styles.price}>
               ₹{product.price}
             </Text>
 
             {product.oldPrice && (
-              <Text style={styles.oldPrice}>
+              <Text
+                style={styles.oldPrice}
+              >
                 ₹{product.oldPrice}
               </Text>
             )}
 
             {product.oldPrice && (
-              <View style={styles.saveBadge}>
-                <Text style={styles.saveText}>
+              <View
+                style={styles.saveBadge}
+              >
+                <Text
+                  style={styles.saveText}
+                >
                   SAVE ₹
-                  {product.oldPrice - product.price}
+                  {product.oldPrice -
+                    product.price}
                 </Text>
               </View>
             )}
@@ -342,86 +651,118 @@ export default function ProductDetailsScreen() {
 
           {/* PRODUCT DETAILS */}
 
-          <View style={styles.detailsGrid}>
-            <View style={styles.detailBox}>
+          <View
+            style={styles.detailsGrid}
+          >
+            <View
+              style={styles.detailBox}
+            >
               <Ionicons
                 name="cube-outline"
                 size={20}
                 color={C.green}
               />
 
-              <Text style={styles.detailLabel}>
+              <Text
+                style={styles.detailLabel}
+              >
                 Quantity
               </Text>
 
-              <Text style={styles.detailValue}>
+              <Text
+                style={styles.detailValue}
+              >
                 {product.quantity}
               </Text>
             </View>
 
-            <View style={styles.detailBox}>
+            <View
+              style={styles.detailBox}
+            >
               <Ionicons
                 name="shield-checkmark-outline"
                 size={20}
                 color={C.green}
               />
 
-              <Text style={styles.detailLabel}>
+              <Text
+                style={styles.detailLabel}
+              >
                 Quality
               </Text>
 
-              <Text style={styles.detailValue}>
+              <Text
+                style={styles.detailValue}
+              >
                 {product.quality}
               </Text>
             </View>
 
-            <View style={styles.detailBox}>
+            <View
+              style={styles.detailBox}
+            >
               <Ionicons
                 name="checkmark-circle-outline"
                 size={20}
                 color={C.green}
               />
 
-              <Text style={styles.detailLabel}>
+              <Text
+                style={styles.detailLabel}
+              >
                 Availability
               </Text>
 
-              <Text style={styles.detailValue}>
+              <Text
+                style={styles.detailValue}
+              >
                 {product.availability}
               </Text>
             </View>
 
             {product.freshness && (
-              <View style={styles.detailBox}>
+              <View
+                style={styles.detailBox}
+              >
                 <Ionicons
                   name="leaf-outline"
                   size={20}
                   color={C.green}
                 />
 
-                <Text style={styles.detailLabel}>
+                <Text
+                  style={styles.detailLabel}
+                >
                   Freshness
                 </Text>
 
-                <Text style={styles.detailValue}>
+                <Text
+                  style={styles.detailValue}
+                >
                   {product.freshness}
                 </Text>
               </View>
             )}
 
             {product.origin && (
-              <View style={styles.detailBox}>
+              <View
+                style={styles.detailBox}
+              >
                 <Ionicons
                   name="location-outline"
                   size={20}
                   color={C.green}
                 />
 
-                <Text style={styles.detailLabel}>
+                <Text
+                  style={styles.detailLabel}
+                >
                   Origin
                 </Text>
 
-                <Text style={styles.detailValue}>
+                <Text
+                  style={styles.detailValue}
+                >
                   {product.origin}
                 </Text>
               </View>
@@ -431,11 +772,15 @@ export default function ProductDetailsScreen() {
           {/* DESCRIPTION */}
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
+            <Text
+              style={styles.sectionTitle}
+            >
               About this product
             </Text>
 
-            <Text style={styles.description}>
+            <Text
+              style={styles.description}
+            >
               {product.description}
             </Text>
           </View>
@@ -443,8 +788,12 @@ export default function ProductDetailsScreen() {
           {/* FEATURES */}
 
           <View style={styles.features}>
-            <View style={styles.featureItem}>
-              <View style={styles.featureIcon}>
+            <View
+              style={styles.featureItem}
+            >
+              <View
+                style={styles.featureIcon}
+              >
                 <Ionicons
                   name="shield-checkmark-outline"
                   size={20}
@@ -452,13 +801,19 @@ export default function ProductDetailsScreen() {
                 />
               </View>
 
-              <Text style={styles.featureText}>
+              <Text
+                style={styles.featureText}
+              >
                 Quality Checked
               </Text>
             </View>
 
-            <View style={styles.featureItem}>
-              <View style={styles.featureIcon}>
+            <View
+              style={styles.featureItem}
+            >
+              <View
+                style={styles.featureIcon}
+              >
                 <Ionicons
                   name="flash-outline"
                   size={20}
@@ -466,13 +821,19 @@ export default function ProductDetailsScreen() {
                 />
               </View>
 
-              <Text style={styles.featureText}>
+              <Text
+                style={styles.featureText}
+              >
                 Fast Delivery
               </Text>
             </View>
 
-            <View style={styles.featureItem}>
-              <View style={styles.featureIcon}>
+            <View
+              style={styles.featureItem}
+            >
+              <View
+                style={styles.featureIcon}
+              >
                 <Ionicons
                   name="refresh-outline"
                   size={20}
@@ -480,7 +841,9 @@ export default function ProductDetailsScreen() {
                 />
               </View>
 
-              <Text style={styles.featureText}>
+              <Text
+                style={styles.featureText}
+              >
                 Easy Returns
               </Text>
             </View>
@@ -490,18 +853,27 @@ export default function ProductDetailsScreen() {
 
       {/* BOTTOM ACTION AREA */}
 
-      <View style={styles.bottomContainer}>
+      <View
+        style={styles.bottomContainer}
+      >
         {/* QUANTITY SELECTOR */}
 
-        <View style={styles.quantitySection}>
-          <Text style={styles.quantityLabel}>
+        <View
+          style={styles.quantitySection}
+        >
+          <Text
+            style={styles.quantityLabel}
+          >
             Quantity
           </Text>
 
-          <View style={styles.quantityBox}>
+          <View
+            style={styles.quantityBox}
+          >
             <Pressable
               style={styles.quantityButton}
               onPress={decreaseQuantity}
+              disabled={product.stock <= 0}
             >
               <Ionicons
                 name="remove"
@@ -510,13 +882,16 @@ export default function ProductDetailsScreen() {
               />
             </Pressable>
 
-            <Text style={styles.quantityValue}>
+            <Text
+              style={styles.quantityValue}
+            >
               {quantity}
             </Text>
 
             <Pressable
               style={styles.quantityButton}
               onPress={increaseQuantity}
+              disabled={product.stock <= 0}
             >
               <Ionicons
                 name="add"
@@ -531,8 +906,15 @@ export default function ProductDetailsScreen() {
 
         <View style={styles.actionRow}>
           <Pressable
-            style={styles.addToCartButton}
-            onPress={addSelectedQuantityToCart}
+            style={[
+              styles.addToCartButton,
+              product.stock <= 0 &&
+                styles.disabledButton,
+            ]}
+            onPress={
+              addSelectedQuantityToCart
+            }
+            disabled={product.stock <= 0}
           >
             <Ionicons
               name="cart-outline"
@@ -540,22 +922,37 @@ export default function ProductDetailsScreen() {
               color={C.green}
             />
 
-            <Text style={styles.addToCartText}>
-              Add to Cart
+            <Text
+              style={styles.addToCartText}
+            >
+              {product.stock <= 0
+                ? 'Out of Stock'
+                : 'Add to Cart'}
             </Text>
           </Pressable>
 
           <Pressable
-            style={styles.buyNowButton}
+            style={[
+              styles.buyNowButton,
+              product.stock <= 0 &&
+                styles.disabledBuyButton,
+            ]}
             onPress={buyNow}
+            disabled={product.stock <= 0}
           >
             <Text style={styles.buyNowText}>
-              Buy Now
+              {product.stock <= 0
+                ? 'Unavailable'
+                : 'Buy Now'}
             </Text>
 
-            <Text style={styles.buyNowPrice}>
-              ₹{totalPrice}
-            </Text>
+            {product.stock > 0 && (
+              <Text
+                style={styles.buyNowPrice}
+              >
+                ₹{totalPrice}
+              </Text>
+            )}
           </Pressable>
         </View>
       </View>
@@ -953,6 +1350,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  disabledButton: {
+    opacity: 0.55,
+  },
+
+  disabledBuyButton: {
+    backgroundColor: C.muted,
+  },
+
   errorContainer: {
     flex: 1,
     alignItems: 'center',
@@ -975,6 +1380,7 @@ const styles = StyleSheet.create({
     marginTop: 7,
     fontSize: 14,
     color: C.muted,
+    textAlign: 'center',
   },
 
   backHomeButton: {

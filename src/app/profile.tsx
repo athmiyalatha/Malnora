@@ -1,388 +1,322 @@
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
-
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
-const COLORS = {
-  maroon: '#741B2B',
-  darkMaroon: '#4B101D',
-  gold: '#B18A4A',
-  cream: '#FBF6ED',
-  white: '#FFFFFF',
-  muted: '#827568',
-  border: '#EAE0D3',
-};
+const MAROON = '#741B2B';
+const DARK_MAROON = '#4B101D';
+const GOLD = '#B18A4A';
+const CREAM = '#FBF6ED';
+const WHITE = '#FFFFFF';
+const TEXT = '#241A17';
+const MUTED = '#827568';
 
 const PROFILE_STORAGE_KEY = '@malnora_profile';
 
-type ProfileDetails = {
+type ProfileData = {
   name: string;
   phone: string;
   email: string;
 };
 
-const EMPTY_PROFILE: ProfileDetails = {
-  name: '',
-  phone: '',
-  email: '',
-};
-
 export default function ProfileScreen() {
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
+  const [profile, setProfile] = useState<ProfileData>({
+    name: 'Malnora Customer',
+    phone: '',
+    email: '',
+  });
 
-  const [profileLoaded, setProfileLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  // Load previously saved profile details.
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadProfile = async () => {
-      try {
-        const savedProfile = await AsyncStorage.getItem(
-          PROFILE_STORAGE_KEY
-        );
-
-        if (savedProfile) {
-          const profile: Partial<ProfileDetails> =
-            JSON.parse(savedProfile);
-
-          if (isMounted) {
-            setName(
-              typeof profile.name === 'string'
-                ? profile.name
-                : ''
+  // Reload profile whenever this screen becomes active
+  useFocusEffect(
+    useCallback(() => {
+      const loadProfile = async () => {
+        try {
+          const savedProfile =
+            await AsyncStorage.getItem(
+              PROFILE_STORAGE_KEY
             );
-            setPhone(
-              typeof profile.phone === 'string'
-                ? profile.phone
-                : ''
-            );
-            setEmail(
-              typeof profile.email === 'string'
-                ? profile.email
-                : ''
-            );
+
+          if (savedProfile) {
+            const parsedProfile: ProfileData =
+              JSON.parse(savedProfile);
+
+            setProfile({
+              name:
+                parsedProfile.name ||
+                'Malnora Customer',
+              phone:
+                parsedProfile.phone || '',
+              email:
+                parsedProfile.email || '',
+            });
           }
+        } catch (error) {
+          console.error(
+            'Failed to load profile:',
+            error
+          );
         }
-      } catch (error) {
-        Alert.alert(
-          'Profile',
-          'Could not load your saved details.'
-        );
-      } finally {
-        if (isMounted) {
-          setProfileLoaded(true);
-        }
-      }
-    };
+      };
 
-    loadProfile();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Save profile details to local storage.
-  const saveProfile = async () => {
-    if (!profileLoaded || saving) {
-      return;
-    }
-
-    const cleanName = name.trim();
-    const cleanPhone = phone.trim();
-    const cleanEmail = email.trim();
-
-    if (!cleanName) {
-      Alert.alert(
-        'Missing name',
-        'Please enter your full name.'
-      );
-      return;
-    }
-
-    if (cleanPhone && !/^\d{10}$/.test(cleanPhone)) {
-      Alert.alert(
-        'Invalid phone number',
-        'Please enter a valid 10-digit phone number.'
-      );
-      return;
-    }
-
-    if (
-      cleanEmail &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
-    ) {
-      Alert.alert(
-        'Invalid email',
-        'Please enter a valid email address.'
-      );
-      return;
-    }
-
-    const profile: ProfileDetails = {
-      name: cleanName,
-      phone: cleanPhone,
-      email: cleanEmail,
-    };
-
-    try {
-      setSaving(true);
-
-      await AsyncStorage.setItem(
-        PROFILE_STORAGE_KEY,
-        JSON.stringify(profile)
-      );
-
-      setName(profile.name);
-      setPhone(profile.phone);
-      setEmail(profile.email);
-
-      Alert.alert(
-        'Profile saved',
-        'Your details have been saved successfully!'
-      );
-    } catch (error) {
-      Alert.alert(
-        'Unable to save',
-        'Your details could not be saved. Please try again.'
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const comingSoon = (section: string) => {
-    Alert.alert(
-      section,
-      `${section} will be available in a future update.`
-    );
-  };
-
-  const menuItem = (
-    emoji: string,
-    title: string,
-    subtitle: string,
-    action: () => void
-  ) => (
-    <TouchableOpacity
-      style={styles.menuRow}
-      onPress={action}
-      activeOpacity={0.75}
-    >
-      <View style={styles.menuIcon}>
-        <Text style={styles.menuEmoji}>{emoji}</Text>
-      </View>
-
-      <View style={styles.menuText}>
-        <Text style={styles.menuTitle}>{title}</Text>
-        <Text style={styles.menuSubtitle}>{subtitle}</Text>
-      </View>
-
-      <Text style={styles.arrow}>›</Text>
-    </TouchableOpacity>
+      loadProfile();
+    }, [])
   );
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  };
+
+  const handleEditProfile = () => {
+    router.push('/edit-profile');
+  };
+
+  const handlePaymentMethods = () => {
+    router.push('/payment-methods');
+  };
+
+  const handleHelpSupport = () => {
+    console.log('Help and support pressed');
+  };
+
+  const handleAboutMalnora = () => {
+    console.log('About Malnora pressed');
+  };
+
+  const handleLogout = () => {
+    console.log('Logout pressed');
+  };
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.content}
-      >
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.brand}>malnora</Text>
-            <Text style={styles.tagline}>
-              YOUR ACCOUNT, YOUR WAY
-            </Text>
-          </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={handleBack}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.backText}>‹</Text>
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.cartButton}
-            onPress={() => router.push('/cart')}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.cartIcon}>🛒</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.hero}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarEmoji}>👤</Text>
-          </View>
-
-          <Text style={styles.heroTitle}>
-            {name.trim()
-              ? `Hello, ${name.trim()}!`
-              : 'Hello, welcome!'}
-          </Text>
-
-          <Text style={styles.heroSubtitle}>
-            Manage your Malnora account
-          </Text>
-        </View>
-
-        <Text style={styles.sectionTitle}>
-          Personal details
+        <Text style={styles.headerTitle}>
+          My Profile
         </Text>
 
-        <View style={styles.card}>
-          <Text style={styles.label}>Full name</Text>
-          <TextInput
-            style={styles.input}
-            value={name}
-            onChangeText={setName}
-            placeholder="Enter your name"
-            placeholderTextColor="#9A9085"
-            autoCapitalize="words"
-            editable={profileLoaded && !saving}
-            returnKeyType="next"
-          />
+        <View style={styles.headerSpacer} />
+      </View>
 
-          <Text style={styles.label}>Phone number</Text>
-          <TextInput
-            style={styles.input}
-            value={phone}
-            onChangeText={(value) =>
-              setPhone(value.replace(/\D/g, '').slice(0, 10))
-            }
-            placeholder="Enter your phone number"
-            placeholderTextColor="#9A9085"
-            keyboardType="phone-pad"
-            maxLength={10}
-            editable={profileLoaded && !saving}
-            returnKeyType="next"
-          />
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Profile Card */}
+        <View style={styles.profileCard}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              👤
+            </Text>
+          </View>
 
-          <Text style={styles.label}>Email address</Text>
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="Enter your email (optional)"
-            placeholderTextColor="#9A9085"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={profileLoaded && !saving}
-            returnKeyType="done"
-          />
+          <View style={styles.profileInfo}>
+            <Text
+              style={styles.name}
+              numberOfLines={1}
+            >
+              {profile.name}
+            </Text>
+
+            <Text style={styles.phone}>
+              {profile.phone
+                ? profile.phone
+                : 'Your account'}
+            </Text>
+          </View>
 
           <TouchableOpacity
-            style={[
-              styles.saveButton,
-              (!profileLoaded || saving) &&
-                styles.saveButtonDisabled,
-            ]}
-            onPress={saveProfile}
+            style={styles.editButton}
+            onPress={handleEditProfile}
             activeOpacity={0.8}
-            disabled={!profileLoaded || saving}
           >
-            <Text style={styles.saveButtonText}>
-              {!profileLoaded
-                ? 'Loading profile...'
-                : saving
-                  ? 'Saving...'
-                  : 'Save details'}
+            <Text style={styles.editText}>
+              Edit
             </Text>
           </TouchableOpacity>
         </View>
 
+        {/* Account Section */}
         <Text style={styles.sectionTitle}>
-          Your account
+          Account
         </Text>
 
         <View style={styles.menuCard}>
-          {menuItem(
-            '📦',
-            'My Orders',
-            'View your past orders',
-            () => router.push('/my-orders')
-          )}
+          {/* My Orders */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              router.push('/my-orders');
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.iconBox}>
+              <Text style={styles.icon}>
+                📦
+              </Text>
+            </View>
 
-          <View style={styles.separator} />
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuTitle}>
+                My Orders
+              </Text>
 
-          {menuItem(
-            '🛒',
-            'My Cart',
-            'Review items before checkout',
-            () => router.push('/cart')
-          )}
+              <Text style={styles.menuSubtitle}>
+                View and track your orders
+              </Text>
+            </View>
 
-          <View style={styles.separator} />
-{menuItem(
-  '📍',
-  'Saved addresses',
-  'Manage delivery locations',
-  () => router.push('/saved-addresses')
-)}
+            <Text style={styles.arrow}>›</Text>
+          </TouchableOpacity>
 
-          <View style={styles.separator} />
+          <View style={styles.divider} />
 
-          {menuItem(
-            '💬',
-            'Help & support',
-            'Get help with your orders',
-            () => comingSoon('Help & support')
-          )}
+          {/* Saved Addresses */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              router.push('/address');
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.iconBox}>
+              <Text style={styles.icon}>
+                📍
+              </Text>
+            </View>
+
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuTitle}>
+                Saved Addresses
+              </Text>
+
+              <Text style={styles.menuSubtitle}>
+                Manage your delivery addresses
+              </Text>
+            </View>
+
+            <Text style={styles.arrow}>›</Text>
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          {/* Payment Methods */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={handlePaymentMethods}
+            activeOpacity={0.7}
+          >
+            <View style={styles.iconBox}>
+              <Text style={styles.icon}>
+                💳
+              </Text>
+            </View>
+
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuTitle}>
+                Payment Methods
+              </Text>
+
+              <Text style={styles.menuSubtitle}>
+                Manage your payment options
+              </Text>
+            </View>
+
+            <Text style={styles.arrow}>›</Text>
+          </TouchableOpacity>
         </View>
 
-        <Text style={styles.footer}>
-          🌿 Fresh choices, thoughtfully delivered.
+        {/* Support */}
+        <Text style={styles.sectionTitle}>
+          Support
+        </Text>
+
+        <View style={styles.menuCard}>
+          {/* Help & Support */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={handleHelpSupport}
+            activeOpacity={0.7}
+          >
+            <View style={styles.iconBox}>
+              <Text style={styles.icon}>
+                💬
+              </Text>
+            </View>
+
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuTitle}>
+                Help & Support
+              </Text>
+
+              <Text style={styles.menuSubtitle}>
+                Get help with your orders
+              </Text>
+            </View>
+
+            <Text style={styles.arrow}>›</Text>
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          {/* About */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={handleAboutMalnora}
+            activeOpacity={0.7}
+          >
+            <View style={styles.iconBox}>
+              <Text style={styles.icon}>
+                ℹ️
+              </Text>
+            </View>
+
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuTitle}>
+                About Malnora
+              </Text>
+
+              <Text style={styles.menuSubtitle}>
+                Learn more about Malnora
+              </Text>
+            </View>
+
+            <Text style={styles.arrow}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Logout */}
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.logoutText}>
+            Log Out
+          </Text>
+        </TouchableOpacity>
+
+        <Text style={styles.version}>
+          Malnora • Grocery made simple
         </Text>
       </ScrollView>
-
-      <View style={styles.bottomNav}>
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => router.replace('/')}
-        >
-          <Text style={styles.navIcon}>⌂</Text>
-          <Text style={styles.navLabel}>Home</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => router.push('/categories')}
-        >
-          <Text style={styles.navIcon}>▦</Text>
-          <Text style={styles.navLabel}>Categories</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => router.push('/my-orders')}
-        >
-          <Text style={styles.navIcon}>📦</Text>
-          <Text style={styles.navLabel}>My Orders</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => router.replace('/profile')}
-        >
-          <Text style={[styles.navIcon, styles.active]}>
-            ♙
-          </Text>
-          <Text style={[styles.navLabel, styles.active]}>
-            Profile
-          </Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
@@ -390,204 +324,189 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.cream,
+    backgroundColor: CREAM,
   },
-  content: {
-    paddingHorizontal: 18,
-    paddingTop: 55,
-    paddingBottom: 110,
-  },
+
   header: {
+    height: 70,
+    backgroundColor: WHITE,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 25,
+    paddingHorizontal: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEE7DB',
   },
-  brand: {
-    color: COLORS.maroon,
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: -1,
-  },
-  tagline: {
-    color: COLORS.muted,
-    fontSize: 9,
-    letterSpacing: 1.8,
-    marginTop: 3,
-  },
-  cartButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: COLORS.white,
+
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#F5EEE5',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
   },
-  cartIcon: {
-    fontSize: 22,
+
+  backText: {
+    fontSize: 34,
+    lineHeight: 36,
+    color: DARK_MAROON,
+    marginTop: -3,
   },
-  hero: {
-    backgroundColor: COLORS.maroon,
+
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 21,
+    fontWeight: '800',
+    color: DARK_MAROON,
+  },
+
+  headerSpacer: {
+    width: 42,
+  },
+
+  content: {
+    padding: 18,
+    paddingBottom: 40,
+  },
+
+  profileCard: {
+    backgroundColor: MAROON,
     borderRadius: 22,
-    padding: 22,
+    padding: 18,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 27,
+    marginBottom: 28,
   },
+
   avatar: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: '#F2E4D7',
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: '#FFF7E8',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
   },
-  avatarEmoji: {
-    fontSize: 36,
+
+  avatarText: {
+    fontSize: 30,
   },
-  heroTitle: {
-    color: COLORS.white,
-    fontSize: 22,
+
+  profileInfo: {
+    flex: 1,
+    marginLeft: 14,
+  },
+
+  name: {
+    color: WHITE,
+    fontSize: 18,
     fontWeight: '800',
   },
-  heroSubtitle: {
-    color: '#F2E4D7',
-    fontSize: 12,
+
+  phone: {
+    color: '#F2DCC8',
+    fontSize: 13,
     marginTop: 5,
   },
-  sectionTitle: {
-    color: COLORS.darkMaroon,
-    fontSize: 20,
-    fontWeight: '800',
-    marginBottom: 13,
-  },
-  card: {
-    backgroundColor: COLORS.white,
-    borderRadius: 18,
+
+  editButton: {
     borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 16,
-    marginBottom: 27,
-  },
-  label: {
-    color: COLORS.darkMaroon,
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 7,
-    marginTop: 8,
-  },
-  input: {
-    height: 46,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
+    borderColor: GOLD,
+    borderRadius: 10,
     paddingHorizontal: 13,
-    color: COLORS.darkMaroon,
-    backgroundColor: '#FFFEFC',
+    paddingVertical: 8,
   },
-  saveButton: {
-    backgroundColor: COLORS.maroon,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    marginTop: 18,
+
+  editText: {
+    color: WHITE,
+    fontWeight: '700',
+    fontSize: 13,
   },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    color: COLORS.white,
-    fontSize: 14,
+
+  sectionTitle: {
+    color: TEXT,
+    fontSize: 17,
     fontWeight: '800',
+    marginBottom: 10,
   },
+
   menuCard: {
-    backgroundColor: COLORS.white,
+    backgroundColor: WHITE,
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: 14,
+    marginBottom: 26,
+    overflow: 'hidden',
   },
-  menuRow: {
+
+  menuItem: {
+    minHeight: 78,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
   },
-  menuIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 13,
-    backgroundColor: '#F4EDE2',
+
+  iconBox: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#F8F1E7',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
-  menuEmoji: {
-    fontSize: 21,
+
+  icon: {
+    fontSize: 22,
   },
-  menuText: {
+
+  menuTextContainer: {
     flex: 1,
+    marginLeft: 13,
   },
+
   menuTitle: {
-    color: COLORS.darkMaroon,
-    fontSize: 14,
+    color: TEXT,
+    fontSize: 15,
     fontWeight: '800',
   },
+
   menuSubtitle: {
-    color: COLORS.muted,
-    fontSize: 11,
+    color: MUTED,
+    fontSize: 12,
     marginTop: 4,
   },
+
   arrow: {
-    color: COLORS.maroon,
-    fontSize: 25,
+    color: MUTED,
+    fontSize: 28,
     marginLeft: 8,
   },
-  separator: {
+
+  divider: {
     height: 1,
-    backgroundColor: COLORS.border,
+    backgroundColor: '#EEE8DE',
+    marginLeft: 74,
   },
-  footer: {
-    textAlign: 'center',
-    color: COLORS.muted,
-    fontSize: 11,
-    marginTop: 28,
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    minHeight: 68,
-    paddingTop: 9,
-    paddingBottom: 12,
-    backgroundColor: COLORS.white,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-  },
-  navItem: {
-    flex: 1,
+
+  logoutButton: {
+    height: 54,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#D8B9B9',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
+    backgroundColor: '#FFF9F8',
   },
-  navIcon: {
-    color: COLORS.maroon,
-    fontSize: 21,
-    fontWeight: '700',
-  },
-  navLabel: {
-    color: COLORS.muted,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  active: {
-    color: COLORS.maroon,
+
+  logoutText: {
+    color: MAROON,
+    fontSize: 16,
     fontWeight: '800',
+  },
+
+  version: {
+    textAlign: 'center',
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 24,
   },
 });
